@@ -39,7 +39,8 @@ const DEFAULT_SETTINGS = {
   aiCaption: 'Una joya especial para un momento inolvidable.',
   aiWhatsapp: '324 234 3363',
   aiBenefits: 'Hechas a mano|Materiales de alta calidad|Duraderas y resistentes',
-  aiStyleReferences: []
+  aiStyleReferences: [],
+  lastBackupAt: 0
 };
 
 const DEFAULT_MATERIALS = [
@@ -770,6 +771,7 @@ function showManagementTab(name) {
 
 function renderAll() {
   renderDashboard();
+  renderGettingStarted();
   renderInventory();
   renderDesigner();
   renderSales();
@@ -778,6 +780,127 @@ function renderAll() {
 
 function activeSales() {
   return S.sales.filter(sale => sale.status !== 'Cancelada');
+}
+
+function setupTasks() {
+  const hasInventory = S.materials.some(material => number(material.stock) > 0);
+  const hasDesign = S.designs.some(design => design.active !== false && (design.components || []).length);
+  const hasProduction = S.productions.some(production => production.status !== 'Anulada')
+    || S.designs.some(design => number(design.finishedStock) > 0);
+  const hasSale = S.sales.some(sale => sale.status !== 'Cancelada');
+  const hasBackup = number(S.settings.lastBackupAt) > 0;
+  return [
+    {
+      id: 'inventory',
+      done: hasInventory,
+      title: 'Cargar los materiales que ya tienes',
+      pending: 'Cuenta balines, hilos, dijes y empaques antes de comenzar.',
+      complete: 'Ya tienes materiales con existencias.',
+      button: 'Abrir inventario'
+    },
+    {
+      id: 'design',
+      done: hasDesign,
+      title: 'Guardar la primera manilla',
+      pending: 'Crea su receta con los materiales de una sola unidad.',
+      complete: 'Ya guardaste al menos un diseño con receta.',
+      button: 'Crear diseño'
+    },
+    {
+      id: 'production',
+      done: hasProduction,
+      title: 'Cargar o fabricar manillas terminadas',
+      pending: 'Registra las que ya están hechas o fabrica un lote nuevo.',
+      complete: 'Ya existe inventario o historial de producción.',
+      button: 'Ir a producción'
+    },
+    {
+      id: 'sale',
+      done: hasSale,
+      title: 'Registrar la primera venta',
+      pending: 'Guarda cliente, cantidad, precio y cuánto dinero recibiste.',
+      complete: 'La primera venta ya está registrada.',
+      button: 'Registrar venta'
+    },
+    {
+      id: 'backup',
+      done: hasBackup,
+      title: 'Descargar el primer respaldo',
+      pending: 'Guarda una copia de seguridad al terminar la jornada.',
+      complete: `Último respaldo: ${dateText(S.settings.lastBackupAt)}`,
+      button: 'Descargar'
+    }
+  ];
+}
+
+function renderGettingStarted() {
+  const container = $('#setup-checklist');
+  if (!container) return;
+  const tasks = setupTasks();
+  const completed = tasks.filter(task => task.done).length;
+  const percentage = Math.round(completed / tasks.length * 100);
+  $('#setup-progress-bar').style.width = `${percentage}%`;
+  $('#setup-progress-text').textContent = `${completed} de ${tasks.length} pasos`;
+  $('#getting-started').classList.toggle('complete', completed === tasks.length);
+  $('#getting-started-title').textContent = completed === tasks.length
+    ? '¡Aurea está lista para trabajar!'
+    : 'Aprende mientras organizas Aurea';
+  container.innerHTML = tasks.map((task, index) => `
+    <article class="setup-task ${task.done ? 'done' : ''}">
+      <span class="setup-task-status" aria-hidden="true">${task.done ? '✓' : index + 1}</span>
+      <div>
+        <b>${esc(task.title)}</b>
+        <p>${esc(task.done ? task.complete : task.pending)}</p>
+      </div>
+      <button class="btn ${task.done ? 'btn-outline' : 'btn-soft'} btn-sm" type="button" onclick="runSetupAction('${task.id}')">${task.done ? 'Ver' : esc(task.button)}</button>
+    </article>
+  `).join('');
+}
+
+function runSetupAction(action) {
+  if (action === 'inventory') {
+    showView('inventory');
+    toast('Abre un material para cargar lo que ya tienes o usa ＋ Compra');
+    return;
+  }
+  if (action === 'design') {
+    showView('designer');
+    return;
+  }
+  if (action === 'production') {
+    showView('management', 'production');
+    return;
+  }
+  if (action === 'sale') {
+    openSale();
+    return;
+  }
+  if (action === 'backup') downloadBackup();
+}
+
+function guideGo(view, tab = '') {
+  closeModal();
+  showView(view, tab);
+}
+
+function openUserGuide() {
+  openModal(`<div class="modal-head"><div><span class="guide-label">Guía sencilla</span><h3>¿Qué debo hacer en Aurea?</h3></div><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="guide-intro"><b>No necesitas aprender todo el primer día.</b><p>Sigue este orden y registra cada movimiento cuando ocurra. Aurea hará los cálculos de inventario, costos, utilidad y saldos.</p></div>
+    <div class="guide-routine">
+      <button type="button" onclick="guideGo('inventory')"><span>1</span><div><b>Cuando compras materiales</b><small>Inventario → busca el material → ＋ Compra.</small></div></button>
+      <button type="button" onclick="guideGo('designer')"><span>2</span><div><b>Cuando creas un modelo</b><small>Diseñar → agrega la receta de una manilla → Guardar.</small></div></button>
+      <button type="button" onclick="guideGo('management','production')"><span>3</span><div><b>Cuando fabricas manillas</b><small>Gestión → Producción → Fabricar. Aquí se descuentan los materiales.</small></div></button>
+      <button type="button" onclick="guideGo('sales')"><span>4</span><div><b>Cuando vendes</b><small>Ventas → ＋ Venta. Registra solamente el dinero recibido.</small></div></button>
+      <button type="button" onclick="guideGo('management','receivables')"><span>5</span><div><b>Cuando te pagan después</b><small>Gestión → Cartera → Registrar abono.</small></div></button>
+      <button type="button" onclick="guideGo('management','expenses')"><span>6</span><div><b>Cuando sale dinero del negocio</b><small>Gestión → Gastos → anota transporte, publicidad o herramientas.</small></div></button>
+    </div>
+    <div class="guide-safety">
+      <b>Si te equivocas</b>
+      <p>No registres lo mismo otra vez. En ventas, compras y abonos usa <strong>Anular</strong> para conservar la historia. Si no sabes qué hacer, descarga primero un respaldo.</p>
+      <b>Al terminar el día</b>
+      <p>Confirma que arriba diga <strong>Sincronizado</strong> y descarga el respaldo desde Gestión → Ajustes.</p>
+    </div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button><button class="btn btn-primary" onclick="guideGo('inventory')">Comenzar por inventario</button></div>`);
 }
 
 function isCurrentMonth(value) {
@@ -2546,8 +2669,10 @@ function saveSettings() {
 }
 
 function downloadBackup() {
+  const backupTime = Date.now();
+  S.settings.lastBackupAt = backupTime;
   const backup = {
-    exportedAt: new Date().toISOString(),
+    exportedAt: new Date(backupTime).toISOString(),
     app: 'Aurea',
     schemaVersion: SCHEMA_VERSION,
     data: normalizeState(S)
@@ -2561,6 +2686,7 @@ function downloadBackup() {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  persist();
   toast('Respaldo descargado');
 }
 
@@ -2629,6 +2755,8 @@ function bindEvents() {
 
   $('#save-settings-btn').onclick = saveSettings;
   $('#download-backup-btn').onclick = downloadBackup;
+  $('#open-user-guide-btn').onclick = openUserGuide;
+  $('#open-full-guide-btn').onclick = openUserGuide;
   $('#add-ai-reference-btn').onclick = () => $('#ai-reference-input').click();
   $('#ai-reference-input').onchange = event => handleAIStyleReferences(event.target.files);
   $('#change-pin-btn').onclick = changePin;
@@ -2654,6 +2782,7 @@ function bindEvents() {
 
 Object.assign(window, {
   AureaDiagnostics: Object.freeze({ schemaVersion: SCHEMA_VERSION, normalizeState: value => normalizeState(clone(value)) }),
+  openUserGuide, guideGo, runSetupAction,
   closeModal, openMaterial, saveMaterial, toggleMaterial, deleteMaterial,
   openPurchase, savePurchase, annulPurchase,
   changeComponentQty, removeComponent,

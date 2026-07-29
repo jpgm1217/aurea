@@ -52,7 +52,10 @@
           <div class="brand-name">AUREA</div>
           <div class="brand-sub">Joyas hechas con amor, brillo y esencia</div>
         </div>
-        <div class="sync" id="sync"><span class="sync-dot"></span><span id="sync-text">Local</span></div>
+        <div class="topbar-actions">
+          <button class="help-button" id="open-user-guide-btn" type="button" aria-label="Abrir guía de uso">? <span>Ayuda</span></button>
+          <div class="sync" id="sync"><span class="sync-dot"></span><span id="sync-text">Local</span></div>
+        </div>
       </div>
     </header>
 
@@ -80,6 +83,23 @@
           <button class="btn btn-primary btn-sm" id="install-btn">Instalar</button>
         </div>
 
+        <section class="getting-started" id="getting-started" aria-labelledby="getting-started-title">
+          <div class="getting-started-head">
+            <div>
+              <span class="guide-label">Tu guía de inicio</span>
+              <h2 id="getting-started-title">Aprende mientras organizas Aurea</h2>
+              <p>Completa estos pasos en orden. La aplicación marcará automáticamente lo que ya hiciste.</p>
+            </div>
+            <button class="btn btn-outline btn-sm" id="open-full-guide-btn" type="button">Ver cómo se usa</button>
+          </div>
+          <div class="setup-progress" aria-label="Progreso de configuración">
+            <div class="setup-progress-track"><span id="setup-progress-bar"></span></div>
+            <b id="setup-progress-text">0 de 5 pasos</b>
+          </div>
+          <div class="setup-checklist" id="setup-checklist"></div>
+          <div class="daily-reminder"><b>Antes de cerrar:</b> espera a que arriba diga <strong>Sincronizado</strong>. Así tus cuentas quedan guardadas.</div>
+        </section>
+
         <div class="stats stats-eight">
           <div class="stat"><div class="stat-label">Ventas del mes</div><div class="stat-value money" id="stat-sales">$0</div><div class="stat-note" id="stat-sales-count">0 ventas</div></div>
           <div class="stat"><div class="stat-label">Utilidad bruta</div><div class="stat-value money" id="stat-profit">$0</div><div class="stat-note">Ventas menos costo</div></div>
@@ -97,9 +117,10 @@
 
       <section class="view" id="view-inventory">
         <div class="section-head">
-          <div><h2>Inventario</h2><p>CRUD de balines, neoprenos, dijes y demás materiales</p></div>
+          <div><h2>Inventario</h2><p>Balines, hilos, dijes, empaques y demás materiales</p></div>
           <div class="section-actions"><button class="btn btn-primary btn-sm" id="add-material-btn">＋ Material</button></div>
         </div>
+        <div class="guided-tip"><span>1</span><div><b>¿Qué hago aquí?</b><p>Si ya tienes materiales, abre <strong>Editar</strong> y coloca el stock actual una sola vez. Cuando compres más, usa <strong>＋ Compra</strong> para que el costo se calcule correctamente.</p></div></div>
         <div class="material-toolbar">
           <input class="input" id="material-search" placeholder="Buscar material o tamaño">
           <select class="input" id="material-category">
@@ -115,6 +136,7 @@
           <div><h2>Diseñar manilla</h2><p>Crea, edita, duplica y guarda diseños con foto o boceto</p></div>
           <div class="section-actions"><button class="btn btn-outline btn-sm" id="new-design-btn">Nuevo</button></div>
         </div>
+        <div class="guided-tip"><span>2</span><div><b>Guarda una receta por cada modelo</b><p>Agrega los materiales que necesita una sola manilla. Guardar el diseño no descuenta inventario; el descuento ocurre únicamente al fabricar.</p></div></div>
 
         <div class="composer-layout">
           <div class="composer">
@@ -238,12 +260,14 @@
 
       <section class="view" id="view-sales">
         <div class="section-head"><div><h2>Ventas</h2><p>Registro, edición, anulación e historial</p></div><button class="btn btn-primary btn-sm" data-action="new-sale">＋ Venta</button></div>
+        <div class="guided-tip"><span>4</span><div><b>Registra cada venta el mismo día</b><p>Si no te pagan todo, escribe solo el valor recibido. El saldo aparecerá automáticamente en <strong>Gestión → Cartera</strong>.</p></div></div>
         <div class="list-toolbar"><input class="input" id="sale-search" placeholder="Buscar por diseño, cliente o teléfono"><select class="input" id="sale-status"><option value="active">Activas</option><option value="all">Todas</option><option value="cancelled">Canceladas</option></select></div>
         <div id="sales-list"></div>
       </section>
 
       <section class="view" id="view-management">
         <div class="section-head"><div><h2>Gestión</h2><p>Producción, compras, cartera, clientes, gastos y trazabilidad</p></div></div>
+        <div class="guided-tip"><span>3</span><div><b>La rutina diaria está aquí</b><p><strong>Producción</strong> para fabricar, <strong>Cartera</strong> para recibir abonos y <strong>Gastos</strong> para anotar el dinero que sale del negocio.</p></div></div>
         <div class="tabs" id="management-tabs">
           <button class="tab active" data-mtab="production">Producción</button>
           <button class="tab" data-mtab="purchases">Compras</button>
