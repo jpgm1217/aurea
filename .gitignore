@@ -1,3 +1,14 @@
+node_modules/
+.firebase/
+.env
+.env.*
 *.log
 .DS_Store
 Thumbs.db
+test-results/
+playwright-report/
+coverage/
+.vscode/
+.idea/
+*-firebase-adminsdk-*.json
+*service-account*.json

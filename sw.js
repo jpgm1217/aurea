@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'aurea-pwa-';
-const CACHE = `${CACHE_PREFIX}v10-stable-operations`;
+const CACHE = `${CACHE_PREFIX}v11-clean-repository`;
 const APP_SHELL = [
   './',
   './index.html',

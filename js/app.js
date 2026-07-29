@@ -81,7 +81,6 @@ let S = {
 };
 
 let db = null;
-let functionsClient = null;
 let saving = false;
 let saveTimer = null;
 let firebaseConnected = false;
@@ -99,8 +98,6 @@ let currentAIVersions = [];
 let currentAIChat = [];
 let currentAIVersionId = '';
 let pendingManualFeedback = '';
-let aiRequestInFlight = false;
-let aiRequestSequence = 0;
 let editingMaterialId = null;
 let editingDesignId = null;
 let editingSaleId = null;
@@ -535,7 +532,6 @@ async function initFirebase() {
         true
       );
     }
-    if (firebase.functions) functionsClient = firebase.app().functions('us-central1');
     if (firebase.auth) {
       const auth = firebase.auth();
       signedInUser = await new Promise(resolve => {
@@ -1478,147 +1474,6 @@ COMPOSICIÓN
 - Acabado editorial premium para catálogo, Instagram y WhatsApp.
 - Dejar aproximadamente 22% de espacio limpio arriba y 24% abajo para la plantilla de marca.
 - No generar texto, logotipos, teléfono, iconos, sellos ni marcas de agua; Aurea los superpondrá después con precisión.`;
-}
-
-function aiErrorMessage(error) {
-  const code = String(error?.code || '').replace(/^functions\//, '');
-  const providerCode = String(error?.details?.providerCode || error?.details || '');
-  const rawMessage = `${code} ${providerCode} ${error?.message || ''}`.toLowerCase();
-  if (code === 'unauthenticated') return 'Activa el acceso autorizado en Firebase Authentication';
-  if (code === 'permission-denied') return 'Tu cuenta o PIN no está autorizado para usar la IA';
-  if (code === 'not-found') return 'Primero despliega la función de IA en Firebase';
-  if (code === 'resource-exhausted' || rawMessage.includes('rate_limit')) return 'Se alcanzó el límite de imágenes; espera un momento antes de intentar de nuevo';
-  if (code === 'deadline-exceeded' || code === 'cancelled') return 'La generación tardó demasiado; puedes volver a intentarlo';
-  if (code === 'invalid-argument' || /(moderation|invalid_prompt|content_policy)/.test(rawMessage)) return 'La solicitud no pudo procesarse. Cambia la instrucción e inténtalo de nuevo';
-  if (/(billing|insufficient_quota)/.test(rawMessage)) return 'Revisa la facturación de OpenAI o Firebase';
-  return 'No fue posible generar la imagen. Revisa Functions y la clave de OpenAI.';
-}
-
-function aiRequestContext(prompt) {
-  return {
-    editingDesignId,
-    prompt,
-    productImageData: currentProductImageData,
-    imageData: currentImageData,
-    responseId: currentAIResponseId,
-    components: JSON.stringify(currentComponents)
-  };
-}
-
-function isSameAIRequestContext(context) {
-  return context.editingDesignId === editingDesignId
-    && context.prompt === buildAIPrompt()
-    && context.productImageData === currentProductImageData
-    && context.imageData === currentImageData
-    && context.responseId === currentAIResponseId
-    && context.components === JSON.stringify(currentComponents);
-}
-
-function setAIRequestControls(disabled) {
-  ['#ai-generate-btn', '#ai-refine-btn', '#ai-prompt-btn', '#upload-image-btn', '#remove-product-image-btn', '#remove-image-btn']
-    .forEach(selector => {
-      const element = $(selector);
-      if (element) element.disabled = disabled;
-    });
-  $$('[data-ai-suggestion], .ai-version').forEach(element => { element.disabled = disabled; });
-}
-
-async function requestAIImage(feedback = '') {
-  if (aiRequestInFlight) {
-    toast('Espera a que termine la imagen actual');
-    return;
-  }
-  const isRefinement = Boolean(feedback && currentImageData);
-  if (!isRefinement && !currentComponents.length && !currentProductImageData) {
-    toast('Agrega materiales o sube una foto real de la manilla');
-    return;
-  }
-  if (location.protocol === 'file:') { toast('Para usar IA abre la app con INICIAR_LOCAL.bat o desde Firebase'); return; }
-  if (!functionsClient) { toast('Firebase Functions no está disponible'); return; }
-  if (!firebase.auth?.().currentUser) { toast('Activa Firebase Authentication para usar la IA'); return; }
-
-  const prompt = buildAIPrompt();
-  const requestContext = aiRequestContext(prompt);
-  const requestSequence = ++aiRequestSequence;
-  const button = isRefinement ? $('#ai-refine-btn') : $('#ai-generate-btn');
-  const originalText = button.textContent;
-  aiRequestInFlight = true;
-  setAIRequestControls(true);
-  button.classList.add('loading');
-  button.textContent = isRefinement ? 'Mejorando…' : 'Creando…';
-  button.disabled = true;
-
-  try {
-    const generate = functionsClient.httpsCallable('generateAureaDesignImage', { timeout: 260_000 });
-    const result = await generate({
-      prompt,
-      feedback,
-      previousResponseId: isRefinement ? currentAIResponseId : '',
-      currentImageUrl: isRefinement ? currentImageData : '',
-      productImageData: isRefinement ? '' : currentProductImageData,
-      styleReferenceImages: isRefinement ? [] : (S.settings.aiStyleReferences || []).slice(0, 4),
-      model: S.settings.aiModel || 'gpt-5.6',
-      quality: S.settings.aiQuality || 'medium',
-      size: S.settings.aiSize || '1024x1536'
-    });
-    const imageUrl = result?.data?.imageUrl;
-    if (!imageUrl) throw new Error('La función no devolvió una imagen');
-    if (requestSequence !== aiRequestSequence || !isSameAIRequestContext(requestContext)) {
-      toast('El diseño cambió mientras se generaba; el resultado no se aplicó');
-      return;
-    }
-
-    const parentVersionId = currentAIVersionId;
-    currentImageData = imageUrl;
-    currentAIResponseId = result?.data?.responseId || '';
-    if (isRefinement) currentAIChat.push({ role: 'user', text: feedback, createdAt: Date.now() });
-    else currentAIChat.push({ role: 'user', text: 'Crear una presentación premium con el estilo de Aurea.', createdAt: Date.now() });
-    currentAIChat.push({
-      role: 'assistant',
-      text: isRefinement ? 'Preparé una nueva versión con tus cambios. Puedes seguir pidiéndome ajustes.' : 'Creé la primera versión. Dime qué quieres mejorar.',
-      createdAt: Date.now()
-    });
-    currentAIChat = currentAIChat.slice(-20);
-    const versionId = uid('aiv');
-    const instruction = isRefinement ? feedback : 'Primera presentación con el estilo guardado de Aurea';
-    currentAIVersions.push({
-      id: versionId,
-      parentId: parentVersionId || '',
-      imageUrl,
-      responseId: currentAIResponseId,
-      instruction,
-      chat: currentAIChat.slice(),
-      createdAt: Date.now()
-    });
-    currentAIVersions = currentAIVersions.slice(-8);
-    currentAIVersionId = versionId;
-    $('#ai-feedback-input').value = '';
-    renderDesigner();
-    const autoSaved = saveDesign({ silent: true });
-    toast(isRefinement
-      ? `Nueva versión creada${autoSaved ? ' y guardada' : ''}`
-      : `Presentación creada con IA${autoSaved ? ' y guardada' : ''}`);
-  } catch (error) {
-    console.error('Generación IA:', error);
-    toast(aiErrorMessage(error));
-  } finally {
-    if (requestSequence === aiRequestSequence) aiRequestInFlight = false;
-    setAIRequestControls(false);
-    button.classList.remove('loading');
-    button.textContent = originalText;
-    button.disabled = false;
-  }
-}
-
-function generateAIImage() {
-  return requestAIImage('');
-}
-
-function refineAIImage(instruction = '') {
-  const feedback = String(instruction || $('#ai-feedback-input').value || '').trim();
-  if (!currentImageData) { toast('Primero crea una presentación'); return; }
-  if (feedback.length < 5) { toast('Describe el cambio que quieres hacer'); return; }
-  return requestAIImage(feedback);
 }
 
 function selectAIVersion(index) {
@@ -2809,7 +2664,7 @@ Object.assign(window, {
   openCustomer, saveCustomer, toggleCustomer, deleteCustomer,
   openExpense, saveExpense, deleteExpense,
   copyAIPrompt, copyAIPromptAndOpenChatGPT, openChatGPT,
-  generateAIImage, refineAIImage, prepareManualAI, prepareManualRefinement, selectAIVersion,
+  prepareManualAI, prepareManualRefinement, selectAIVersion,
   removeAIStyleReference, downloadAureaPresentation
 });
 
