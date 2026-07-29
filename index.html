@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090705">
+  <meta name="description" content="Gestión de inventario, diseños, compras, ventas, clientes y gastos de Aurea.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Aurea">
+  <title>Aurea · Gestión del emprendimiento</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <section class="pin-screen" id="pin-screen" aria-label="Acceso Aurea">
+    <div class="pin-card">
+      <img src="assets/logo-aurea.jpg" class="pin-logo" alt="Logo Aurea">
+      <div class="pin-title">AUREA</div>
+      <p class="pin-sub" id="pin-sub">Ingresa tu PIN de 4 dígitos</p>
+      <div class="pin-dots" aria-hidden="true">
+        <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+      </div>
+      <div class="pin-keypad">
+        <button data-pin="1">1</button><button data-pin="2">2</button><button data-pin="3">3</button>
+        <button data-pin="4">4</button><button data-pin="5">5</button><button data-pin="6">6</button>
+        <button data-pin="7">7</button><button data-pin="8">8</button><button data-pin="9">9</button>
+        <span></span><button data-pin="0">0</button><button id="pin-del" aria-label="Borrar">⌫</button>
+      </div>
+      <div class="pin-hint" id="pin-hint"></div>
+    </div>
+  </section>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <img src="assets/logo-aurea.jpg" class="brand-logo" alt="Aurea">
+        <div class="brand-copy">
+          <div class="brand-name">AUREA</div>
+          <div class="brand-sub">Joyas hechas con amor, brillo y esencia</div>
+        </div>
+        <div class="sync" id="sync"><span class="sync-dot"></span><span id="sync-text">Local</span></div>
+      </div>
+    </header>
+
+    <div class="local-warning hidden" id="local-warning">
+      Estás abriendo archivos directamente. Para sincronización y funciones PWA ejecuta <b>npx serve .</b> desde la raíz o usa la versión publicada.
+    </div>
+
+    <main>
+      <section class="view active" id="view-home">
+        <div class="hero">
+          <div class="hero-kicker">Gestión del emprendimiento</div>
+          <h1>Inventario, diseños, ventas y utilidad.</h1>
+          <p>Controla cada material y calcula precios rentables con costos reales.</p>
+          <div class="quick-actions">
+            <button class="quick" data-go="designer"><strong>＋ Diseñar manilla</strong><span>Materiales y precio sugerido</span></button>
+            <button class="quick" data-go="inventory"><strong>＋ Registrar compra</strong><span>Actualizar stock y costos</span></button>
+            <button class="quick" data-action="new-sale"><strong>＋ Registrar venta</strong><span>Ingreso y utilidad</span></button>
+            <button class="quick" data-go="management" data-tab="expenses"><strong>＋ Registrar gasto</strong><span>Control de utilidad neta</span></button>
+          </div>
+        </div>
+
+        <div id="install-banner" class="install-banner hidden">
+          <div><b>Instalar Aurea</b><span>Úsala como una aplicación independiente.</span></div>
+          <button class="btn btn-primary btn-sm" id="install-btn">Instalar</button>
+        </div>
+
+        <div class="stats stats-six">
+          <div class="stat"><div class="stat-label">Ventas del mes</div><div class="stat-value money" id="stat-sales">$0</div><div class="stat-note" id="stat-sales-count">0 ventas</div></div>
+          <div class="stat"><div class="stat-label">Utilidad bruta</div><div class="stat-value money" id="stat-profit">$0</div><div class="stat-note">Ventas menos costo</div></div>
+          <div class="stat"><div class="stat-label">Gastos del mes</div><div class="stat-value money" id="stat-expenses">$0</div><div class="stat-note">Gastos operativos</div></div>
+          <div class="stat"><div class="stat-label">Utilidad neta</div><div class="stat-value money" id="stat-net">$0</div><div class="stat-note">Utilidad menos gastos</div></div>
+          <div class="stat"><div class="stat-label">Inventario</div><div class="stat-value money" id="stat-inventory">$0</div><div class="stat-note" id="stat-units">0 unidades</div></div>
+          <div class="stat"><div class="stat-label">Stock bajo</div><div class="stat-value" id="stat-low">0</div><div class="stat-note">Referencias por comprar</div></div>
+        </div>
+
+        <div class="section-head"><div><h2>Actividad reciente</h2><p>Últimas ventas registradas</p></div></div>
+        <div id="recent-sales"></div>
+      </section>
+
+      <section class="view" id="view-inventory">
+        <div class="section-head">
+          <div><h2>Inventario</h2><p>CRUD de balines, neoprenos, dijes y demás materiales</p></div>
+          <div class="section-actions"><button class="btn btn-primary btn-sm" id="add-material-btn">＋ Material</button></div>
+        </div>
+        <div class="material-toolbar">
+          <input class="input" id="material-search" placeholder="Buscar material o tamaño">
+          <select class="input" id="material-category">
+            <option value="">Todas</option><option>Balín</option><option>Neopreno</option><option>Dije</option><option>Hilo</option><option>Empaque</option><option>Otro</option>
+          </select>
+          <select class="input" id="material-status"><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select>
+        </div>
+        <div id="material-list" class="material-list"></div>
+      </section>
+
+      <section class="view" id="view-designer">
+        <div class="section-head">
+          <div><h2>Diseñar manilla</h2><p>Crea, edita, duplica y guarda diseños con foto o boceto</p></div>
+          <div class="section-actions"><button class="btn btn-outline btn-sm" id="new-design-btn">Nuevo</button></div>
+        </div>
+
+        <div class="composer-layout">
+          <div class="composer">
+            <div class="card form-grid two">
+              <div class="field"><label>Nombre del diseño</label><input class="input" id="design-name" placeholder="Ej. Aurea Clásica Negra"></div>
+              <div class="field"><label>Color del hilo</label><select class="input" id="thread-color"><option>Negro</option><option>Rojo</option><option>Beige</option><option>Rosado</option><option>Blanco</option><option>Azul</option><option>Otro</option></select></div>
+              <div class="field full"><label>Descripción / notas</label><textarea class="input" id="design-notes" placeholder="Detalles del diseño, talla, inspiración o instrucciones"></textarea></div>
+            </div>
+
+            <div class="card">
+              <div class="field">
+                <label>Agregar material</label>
+                <div class="component-adder"><select class="input" id="component-material"></select><input class="input qty" id="component-qty" type="number" min="1" value="1"><button class="btn btn-primary" id="add-component-btn">Agregar</button></div>
+              </div>
+              <div id="component-list" class="components" style="margin-top:12px"></div>
+            </div>
+
+            <div class="card">
+              <div class="inline spread preview-head">
+                <div><b class="serif card-title">Imagen del diseño</b><span class="help block">Puedes subir una foto hecha en otra aplicación o una fotografía real.</span></div>
+                <div class="inline actions-wrap">
+                  <input type="file" id="design-image-input" accept="image/*" class="hidden">
+                  <button class="btn btn-soft btn-sm" id="upload-image-btn">Subir foto</button>
+                  <button class="btn btn-outline btn-sm" id="remove-image-btn">Quitar</button>
+                  <button class="btn btn-outline btn-sm" id="ai-prompt-btn">Ver prompt</button>
+                  <button class="btn btn-primary btn-sm" id="ai-generate-btn">Generar con IA</button>
+                </div>
+              </div>
+              <div class="image-preview-wrap hidden" id="design-image-wrap"><img id="design-image-preview" alt="Imagen del diseño"></div>
+              <div class="inline spread preview-head secondary-preview"><b class="serif card-title">Boceto automático</b><span class="help">Vista aproximada según materiales</span></div>
+              <div class="bracelet-preview"><div class="bracelet-line" id="bracelet-line"></div></div>
+            </div>
+          </div>
+
+          <div class="sticky-result">
+            <div class="card">
+              <b class="serif card-title">Desglose de costos</b>
+              <table class="breakdown" style="margin-top:10px"><thead><tr><th>Concepto</th><th>Cant.</th><th>Unitario</th><th>Total</th></tr></thead><tbody id="cost-lines"></tbody><tfoot id="cost-totals"></tfoot></table>
+            </div>
+            <div class="card">
+              <b class="serif card-title">Precios sugeridos</b>
+              <div class="pricing-grid" style="margin-top:12px"><div class="price-box"><small>Mínimo</small><b id="price-min">$0</b></div><div class="price-box recommended"><small>Recomendado</small><b id="price-rec">$0</b></div><div class="price-box"><small>Premium</small><b id="price-premium">$0</b></div></div>
+              <div class="modal-actions design-actions">
+                <button class="btn btn-soft" id="share-design-btn">WhatsApp</button>
+                <button class="btn btn-primary" id="save-design-btn">Guardar</button>
+              </div>
+              <div class="modal-actions design-actions hidden" id="edit-design-actions">
+                <button class="btn btn-outline" id="duplicate-design-btn">Duplicar</button>
+                <button class="btn btn-danger" id="delete-design-btn">Eliminar</button>
+              </div>
+            </div>
+            <div class="card"><div class="field"><label>Diseños guardados</label><select class="input" id="saved-designs"><option value="">Seleccionar diseño...</option></select></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-sales">
+        <div class="section-head"><div><h2>Ventas</h2><p>Registro, edición, anulación e historial</p></div><button class="btn btn-primary btn-sm" data-action="new-sale">＋ Venta</button></div>
+        <div class="list-toolbar"><input class="input" id="sale-search" placeholder="Buscar por diseño, cliente o teléfono"><select class="input" id="sale-status"><option value="active">Activas</option><option value="all">Todas</option><option value="cancelled">Canceladas</option></select></div>
+        <div id="sales-list"></div>
+      </section>
+
+      <section class="view" id="view-management">
+        <div class="section-head"><div><h2>Gestión</h2><p>Compras, clientes, gastos, movimientos y parámetros</p></div></div>
+        <div class="tabs" id="management-tabs">
+          <button class="tab active" data-mtab="purchases">Compras</button>
+          <button class="tab" data-mtab="customers">Clientes</button>
+          <button class="tab" data-mtab="expenses">Gastos</button>
+          <button class="tab" data-mtab="movements">Movimientos</button>
+          <button class="tab" data-mtab="settings">Ajustes</button>
+        </div>
+
+        <section class="management-panel active" id="panel-purchases">
+          <div class="section-head compact"><div><h3>Compras</h3><p>Historial de entradas de inventario</p></div><button class="btn btn-primary btn-sm" id="new-purchase-btn">＋ Compra</button></div>
+          <div id="purchases-list"></div>
+        </section>
+
+        <section class="management-panel" id="panel-customers">
+          <div class="section-head compact"><div><h3>Clientes</h3><p>Contactos e historial comercial</p></div><button class="btn btn-primary btn-sm" id="new-customer-btn">＋ Cliente</button></div>
+          <div id="customers-list"></div>
+        </section>
+
+        <section class="management-panel" id="panel-expenses">
+          <div class="section-head compact"><div><h3>Gastos</h3><p>Publicidad, transporte, herramientas y otros</p></div><button class="btn btn-primary btn-sm" id="new-expense-btn">＋ Gasto</button></div>
+          <div id="expenses-list"></div>
+        </section>
+
+        <section class="management-panel" id="panel-movements">
+          <div class="section-head compact"><div><h3>Movimientos</h3><p>Trazabilidad de entradas, salidas y ajustes</p></div></div>
+          <div id="movements-list"></div>
+        </section>
+
+        <section class="management-panel" id="panel-settings">
+          <div class="card settings-group">
+            <h3 class="settings-title">Costos internos</h3>
+            <div class="setting-row"><div class="setting-label"><b>Empaque y presentación</b><span>Se agrega a cada manilla.</span></div><input class="input money-setting" id="set-packaging" type="number" min="0"></div>
+            <div class="setting-row"><div class="setting-label"><b>Mano de obra base</b><span>Valor fijo por elaboración.</span></div><input class="input money-setting" id="set-labor" type="number" min="0"></div>
+            <div class="setting-row"><div class="setting-label"><b>Desperdicio</b><span>Porcentaje adicional sobre materiales.</span></div><div class="inline"><input class="input" id="set-waste" type="number" min="0" max="50" step="0.5"><b>%</b></div></div>
+          </div>
+          <div class="card settings-group">
+            <h3 class="settings-title">Precios de venta</h3>
+            <div class="setting-row"><div class="setting-label"><b>Margen mínimo</b><span>Precio más bajo recomendado.</span></div><div class="inline"><input class="input" id="set-margin-min" type="number" min="0" max="90"><b>%</b></div></div>
+            <div class="setting-row"><div class="setting-label"><b>Margen recomendado</b><span>Precio principal de Aurea.</span></div><div class="inline"><input class="input" id="set-margin-rec" type="number" min="0" max="90"><b>%</b></div></div>
+            <div class="setting-row"><div class="setting-label"><b>Margen premium</b><span>Diseños especiales o personalizados.</span></div><div class="inline"><input class="input" id="set-margin-premium" type="number" min="0" max="90"><b>%</b></div></div>
+            <div class="setting-row"><div class="setting-label"><b>Redondear a</b><span>Evita precios con decimales.</span></div><select class="input" id="set-round"><option value="500">$500</option><option value="1000">$1.000</option><option value="5000">$5.000</option></select></div>
+          </div>
+          <div class="card settings-group">
+            <h3 class="settings-title">Generación de imágenes con IA</h3>
+            <p class="help">La clave de OpenAI se guarda como secreto en Firebase Functions; nunca queda dentro de la PWA.</p>
+            <div class="setting-row"><div class="setting-label"><b>Modelo</b><span>Calidad y costo de generación.</span></div><select class="input" id="set-ai-model"><option value="gpt-image-1">GPT Image 2</option><option value="gpt-image-1">GPT Image 1.5</option><option value="gpt-image-1-mini">GPT Image 1 Mini</option></select></div>
+            <div class="setting-row"><div class="setting-label"><b>Calidad</b><span>Media es el equilibrio inicial recomendado.</span></div><select class="input" id="set-ai-quality"><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></select></div>
+            <div class="setting-row"><div class="setting-label"><b>Formato</b><span>Vertical para publicaciones o cuadrado para catálogo.</span></div><select class="input" id="set-ai-size"><option value="1024x1536">Vertical 1024 × 1536</option><option value="1024x1024">Cuadrado 1024 × 1024</option><option value="1536x1024">Horizontal 1536 × 1024</option></select></div>
+          </div>
+          <button class="btn btn-primary btn-block" id="save-settings-btn">Guardar parámetros</button>
+          <div class="card settings-group" style="margin-top:14px">
+            <h3 class="settings-title">Seguridad y acceso</h3>
+            <p class="help">El mismo PIN protege Aurea desde GomezHub y como PWA independiente.</p>
+            <div class="form-grid two" style="margin-top:10px"><div class="field"><label>Nuevo PIN</label><input class="input" id="new-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div><div class="field"><label>Confirmar PIN</label><input class="input" id="confirm-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div></div>
+            <button class="btn btn-dark btn-block" id="change-pin-btn" style="margin-top:10px">Cambiar PIN</button>
+            <button class="btn btn-outline btn-block" id="lock-btn" style="margin-top:8px">Bloquear ahora</button>
+          </div>
+          <div class="card" style="margin-top:14px"><a class="btn btn-outline btn-block" href="../index.html">Volver a GomezHub</a></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-view="home"><span class="nav-icon">⌂</span><span>Inicio</span></button>
+    <button class="nav-btn" data-view="inventory"><span class="nav-icon">◫</span><span>Inventario</span></button>
+    <button class="nav-btn" data-view="designer"><span class="nav-icon">✦</span><span>Diseñar</span></button>
+    <button class="nav-btn" data-view="sales"><span class="nav-icon">$</span><span>Ventas</span></button>
+    <button class="nav-btn" data-view="management"><span class="nav-icon">☰</span><span>Gestión</span></button>
+  </nav>
+
+  <div class="modal-backdrop hidden" id="modal-backdrop"><div class="modal" id="modal"></div></div>
+  <div class="toast" id="toast"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-functions-compat.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
