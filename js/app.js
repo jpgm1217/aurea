@@ -15,6 +15,8 @@ const PIN_PATH = 'aurea/v1/config/pinHash';
 const LOCAL_KEY = 'aurea_data_v1';
 const PIN_KEY = 'aurea_pin_hash_v1';
 
+const AUREA_BRAND_PROMPT = `Dirección artística de catálogo premium para AUREA, una marca colombiana de manillas artesanales. Inspiración visual: fotografía vertical elegante, cálida y romántica; paleta champaña, crema, rosa empolvado, negro profundo y dorado; telas satinadas, lino fino, fibras naturales y flores secas muy sutiles; iluminación editorial suave con destellos dorados controlados; profundidad de campo delicada; producto protagonista, nítido y realista. La escena debe sentirse artesanal, femenina, amorosa, sofisticada y lista para Instagram o WhatsApp. Conservar exactamente la forma, colores, cantidades, orden y materiales de la manilla de referencia. No añadir ni quitar balines, dijes, hilos o accesorios. No generar letras, logotipos, marcas de agua, números, sellos ni iconos. Dejar espacio visual limpio en la parte superior y en la parte inferior para que Aurea coloque después su identidad, beneficios y WhatsApp sin cubrir el producto.`;
+
 const DEFAULT_SETTINGS = {
   packaging: 5000,
   labor: 15000,
@@ -24,9 +26,16 @@ const DEFAULT_SETTINGS = {
   marginPremium: 55,
   roundTo: 1000,
   lowStock: 5,
-  aiModel: 'gpt-image-1',
+  aiModel: 'gpt-5.6',
   aiQuality: 'medium',
-  aiSize: '1024x1536'
+  aiSize: '1024x1536',
+  aiTheme: 'champagne',
+  aiBrandPrompt: AUREA_BRAND_PROMPT,
+  aiHeadline: 'Detalles que hablan de ti',
+  aiCaption: 'Una joya especial para un momento inolvidable.',
+  aiWhatsapp: '324 234 3363',
+  aiBenefits: 'Hechas a mano|Materiales de alta calidad|Duraderas y resistentes',
+  aiStyleReferences: []
 };
 
 const DEFAULT_MATERIALS = [
@@ -69,6 +78,13 @@ let saveTimer = null;
 let deferredInstall = null;
 let currentComponents = [];
 let currentImageData = '';
+let currentProductImageData = '';
+let currentAIResponseId = '';
+let currentAIVersions = [];
+let currentAIChat = [];
+let currentAIVersionId = '';
+let aiRequestInFlight = false;
+let aiRequestSequence = 0;
 let editingMaterialId = null;
 let editingDesignId = null;
 let editingSaleId = null;
@@ -109,8 +125,11 @@ function setSync(mode, text) {
 
 function normalizeState(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
+  const settings = { ...DEFAULT_SETTINGS, ...(source.settings || {}) };
+  if (!String(settings.aiModel || '').startsWith('gpt-5.6')) settings.aiModel = 'gpt-5.6';
+  settings.aiStyleReferences = Array.isArray(settings.aiStyleReferences) ? settings.aiStyleReferences.slice(0, 4) : [];
   return {
-    settings: { ...DEFAULT_SETTINGS, ...(source.settings || {}) },
+    settings,
     materials: Array.isArray(source.materials) && source.materials.length ? source.materials : DEFAULT_MATERIALS,
     designs: Array.isArray(source.designs) ? source.designs : [],
     sales: Array.isArray(source.sales) ? source.sales : [],
@@ -130,8 +149,20 @@ function loadLocal() {
   }
 }
 
+function saveLocalState() {
+  try {
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(S));
+    return true;
+  } catch (error) {
+    console.warn('No fue posible guardar todos los datos en este dispositivo:', error);
+    setSync('error', 'Sin espacio local');
+    return false;
+  }
+}
+
 function persist() {
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(S));
+  const savedLocally = saveLocalState();
+  if (!savedLocally) toast('El dispositivo no tiene espacio para guardar más fotos');
   renderAll();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
@@ -152,21 +183,32 @@ function persist() {
 
 async function initFirebase() {
   if (typeof firebase === 'undefined') {
+    $('#auth-screen')?.classList.add('hidden');
     setSync('error', 'Solo local');
-    return;
+    return true;
   }
+  let signedInUser = null;
   try {
     if (!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
-
+    if (firebase.functions) functionsClient = firebase.app().functions('us-central1');
     if (firebase.auth) {
-      try {
-        if (!firebase.auth().currentUser) await firebase.auth().signInAnonymously();
-      } catch (authError) {
-        console.warn('Autenticación anónima no disponible:', authError);
-      }
+      const auth = firebase.auth();
+      signedInUser = await new Promise(resolve => {
+        let unsubscribe = () => {};
+        unsubscribe = auth.onAuthStateChanged(user => {
+          unsubscribe();
+          resolve(user || null);
+        }, () => resolve(null));
+      });
+    }
+    if (!signedInUser) {
+      $('#auth-screen')?.classList.remove('hidden');
+      setSync('error', 'Inicia sesión');
+      return false;
     }
 
-    if (firebase.functions) functionsClient = firebase.app().functions('us-central1');
+    $('#auth-screen')?.classList.add('hidden');
+    if ($('#connected-account')) $('#connected-account').textContent = signedInUser.email || 'Cuenta de Google';
     db = firebase.database();
     const snapshot = await Promise.race([
       db.ref(DATA_PATH).once('value'),
@@ -174,18 +216,55 @@ async function initFirebase() {
     ]);
     if (snapshot.exists()) S = normalizeState(snapshot.val());
     else await db.ref(DATA_PATH).set(S);
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(S));
+    saveLocalState();
     setSync('online', 'Sincronizado');
     db.ref(DATA_PATH).on('value', snap => {
       if (saving || !snap.exists()) return;
       S = normalizeState(snap.val());
-      localStorage.setItem(LOCAL_KEY, JSON.stringify(S));
+      saveLocalState();
       renderAll();
     });
+    return true;
   } catch (error) {
+    if (signedInUser) $('#auth-screen')?.classList.add('hidden');
     setSync('error', 'Solo local');
     console.warn('Firebase:', error);
+    return Boolean(signedInUser);
   }
+}
+
+async function signInWithGoogle() {
+  if (typeof firebase === 'undefined' || !firebase.auth) {
+    $('#auth-help').textContent = 'Firebase Authentication no está disponible.';
+    $('#auth-help').classList.add('error');
+    return;
+  }
+  const button = $('#google-signin-btn');
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Abriendo Google…';
+  $('#auth-help').classList.remove('error');
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await firebase.auth().signInWithPopup(provider);
+    location.reload();
+  } catch (error) {
+    console.warn('Ingreso con Google:', error);
+    $('#auth-help').textContent = error?.code === 'auth/unauthorized-domain'
+      ? 'Debes autorizar este dominio en Firebase Authentication.'
+      : 'No fue posible ingresar. Revisa la cuenta autorizada e inténtalo de nuevo.';
+    $('#auth-help').classList.add('error');
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+async function signOutGoogle() {
+  if (typeof firebase !== 'undefined' && firebase.auth) await firebase.auth().signOut();
+  sessionStorage.removeItem('aurea_unlocked');
+  location.reload();
 }
 
 async function hashPIN(pin) {
@@ -690,16 +769,34 @@ function renderDesigner() {
   });
   $('#bracelet-line').innerHTML = beads.length ? beads.join('') : '<span style="color:#9f8871;font-size:12px">El boceto aparecerá aquí</span>';
 
+  const productWrap = $('#product-reference-wrap');
+  if (currentProductImageData) {
+    $('#product-reference-preview').src = currentProductImageData;
+    productWrap.classList.remove('hidden');
+    $('#remove-product-image-btn').classList.remove('hidden');
+  } else {
+    $('#product-reference-preview').removeAttribute('src');
+    productWrap.classList.add('hidden');
+    $('#remove-product-image-btn').classList.add('hidden');
+  }
+
+  const styleCount = (S.settings.aiStyleReferences || []).length;
+  $('#ai-style-summary').textContent = styleCount
+    ? `${styleCount} referencia${styleCount === 1 ? '' : 's'} visual${styleCount === 1 ? '' : 'es'} guardada${styleCount === 1 ? '' : 's'} para la marca.`
+    : 'Usará la identidad champaña, rosa y negro dorado guardada en el prompt.';
+
   const imageWrap = $('#design-image-wrap');
   if (currentImageData) {
     $('#design-image-preview').src = currentImageData;
     imageWrap.classList.remove('hidden');
-    $('#remove-image-btn').classList.remove('hidden');
   } else {
     $('#design-image-preview').removeAttribute('src');
     imageWrap.classList.add('hidden');
-    $('#remove-image-btn').classList.add('hidden');
   }
+
+  renderPosterBrand();
+  renderAIVersions();
+  renderAIChat();
 
   const prices = priceData();
   const rows = currentComponents.map(component => {
@@ -727,10 +824,59 @@ function renderDesigner() {
   $('#edit-design-actions').classList.toggle('hidden', !editingDesignId);
 }
 
+function brandBenefits() {
+  return String(S.settings.aiBenefits || DEFAULT_SETTINGS.aiBenefits)
+    .split('|')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function renderPosterBrand() {
+  const poster = $('#aurea-poster-preview');
+  if (!poster) return;
+  const format = S.settings.aiSize === '1024x1024'
+    ? 'square'
+    : S.settings.aiSize === '1536x1024' ? 'horizontal' : 'vertical';
+  poster.className = `aurea-poster theme-${S.settings.aiTheme || 'champagne'} format-${format}`;
+  $('#poster-headline').textContent = S.settings.aiHeadline || DEFAULT_SETTINGS.aiHeadline;
+  $('#poster-caption').textContent = S.settings.aiCaption || DEFAULT_SETTINGS.aiCaption;
+  $('#poster-whatsapp').textContent = S.settings.aiWhatsapp || DEFAULT_SETTINGS.aiWhatsapp;
+  $('#poster-benefits').innerHTML = brandBenefits().map(item => `<div class="poster-benefit">${esc(item)}</div>`).join('');
+}
+
+function renderAIVersions() {
+  const wrap = $('#ai-versions-wrap');
+  const strip = $('#ai-version-strip');
+  if (!wrap || !strip) return;
+  wrap.classList.toggle('hidden', currentAIVersions.length === 0);
+  strip.innerHTML = currentAIVersions.map((version, index) => `
+    <button class="ai-version ${version.imageUrl === currentImageData ? 'active' : ''}" type="button" onclick="selectAIVersion(${index})" title="${esc(version.instruction || `Versión ${index + 1}`)}">
+      <img src="${esc(version.imageUrl)}" alt="Versión ${index + 1}">
+      <span>V${index + 1}</span>
+    </button>`).join('');
+}
+
+function renderAIChat() {
+  const chat = $('#ai-chat');
+  const messages = $('#ai-chat-messages');
+  if (!chat || !messages) return;
+  chat.classList.toggle('hidden', !currentImageData);
+  messages.innerHTML = currentAIChat.length ? currentAIChat.map(message => `
+    <div class="ai-message ${message.role === 'user' ? 'user' : 'assistant'}">${esc(message.text)}</div>`).join('') :
+    '<div class="ai-message assistant">La primera versión está lista. Dime qué quieres cambiar y conservaré el contexto del diseño.</div>';
+  messages.scrollTop = messages.scrollHeight;
+}
+
 function resetDesign() {
   editingDesignId = null;
   currentComponents = [];
   currentImageData = '';
+  currentProductImageData = '';
+  currentAIResponseId = '';
+  currentAIVersions = [];
+  currentAIChat = [];
+  currentAIVersionId = '';
   $('#design-name').value = '';
   $('#thread-color').value = 'Negro';
   $('#design-notes').value = '';
@@ -738,15 +884,23 @@ function resetDesign() {
   renderDesigner();
 }
 
-function saveDesign() {
+function saveDesign(options = {}) {
+  const silent = options?.silent === true;
   const name = $('#design-name').value.trim();
-  if (!name || !currentComponents.length) { toast('Agrega nombre y materiales'); return; }
+  if (!name || (!currentComponents.length && !currentProductImageData && !currentImageData)) {
+    if (!silent) toast('Agrega nombre y materiales o una foto');
+    return false;
+  }
   const prices = priceData();
   const payload = {
     name,
     threadColor: $('#thread-color').value,
     notes: $('#design-notes').value.trim(),
     imageData: currentImageData || '',
+    productImageData: currentProductImageData || '',
+    aiResponseId: currentAIResponseId || '',
+    aiVersions: currentAIVersions.slice(-8),
+    aiChat: currentAIChat.slice(-20),
     components: currentComponents.map(component => {
       const material = getMaterial(component.materialId);
       return { ...component, name: material?.name || '', size: material?.size || '', category: material?.category || '', costSnapshot: number(material?.cost) };
@@ -762,14 +916,15 @@ function saveDesign() {
   if (editingDesignId) {
     const design = getDesign(editingDesignId);
     Object.assign(design, payload);
-    toast('Diseño actualizado');
+    if (!silent) toast('Diseño actualizado');
   } else {
     const design = { id: uid('des'), ...payload, createdAt: Date.now() };
     S.designs.push(design);
     editingDesignId = design.id;
-    toast('Diseño guardado');
+    if (!silent) toast('Diseño guardado');
   }
   persist();
+  return true;
 }
 
 function loadDesign(id) {
@@ -779,7 +934,13 @@ function loadDesign(id) {
   $('#design-name').value = design.name || '';
   $('#thread-color').value = design.threadColor || 'Negro';
   $('#design-notes').value = design.notes || '';
-  currentImageData = design.imageData || '';
+  const legacyProductImage = String(design.imageData || '').startsWith('data:image/') && !design.productImageData && !design.aiResponseId;
+  currentImageData = legacyProductImage ? '' : (design.imageData || '');
+  currentProductImageData = design.productImageData || (legacyProductImage ? design.imageData : '');
+  currentAIResponseId = design.aiResponseId || '';
+  currentAIVersions = Array.isArray(design.aiVersions) ? design.aiVersions : [];
+  currentAIChat = Array.isArray(design.aiChat) ? design.aiChat : [];
+  currentAIVersionId = currentAIVersions.find(version => version.imageUrl === currentImageData)?.id || currentAIVersions.at(-1)?.id || '';
   currentComponents = (design.components || []).map(component => ({ materialId: component.materialId, qty: number(component.qty) })).filter(component => getMaterial(component.materialId));
   renderDesigner();
   toast('Diseño cargado');
@@ -789,6 +950,9 @@ function duplicateDesign() {
   if (!editingDesignId) return;
   const originalName = $('#design-name').value.trim() || 'Diseño';
   editingDesignId = null;
+  currentAIResponseId = '';
+  currentAIChat = [];
+  currentAIVersionId = currentAIVersions.find(version => version.imageUrl === currentImageData)?.id || '';
   $('#design-name').value = `${originalName} copia`;
   renderDesigner();
   toast('Copia preparada; guarda el nuevo diseño');
@@ -826,62 +990,187 @@ function shareDesign() {
 function buildAIPrompt() {
   const name = $('#design-name').value.trim() || 'manilla Aurea';
   const thread = $('#thread-color').value;
+  const notes = $('#design-notes').value.trim();
   const details = currentComponents.map(component => {
     const material = getMaterial(component.materialId);
     return `${number(component.qty)} ${material?.name || 'accesorios'} de ${material?.size || 'tamaño pequeño'}`;
   }).join(', ');
-  return `Fotografía comercial hiperrealista de una manilla de macramé de la marca Aurea, llamada “${name}”. Hilo color ${thread}. Composición exacta: ${details || 'diseño minimalista en macramé'}. Mantener exactamente la cantidad, tamaño relativo y orden de los accesorios. Fondo negro elegante con iluminación dorada suave, fotografía de producto premium, enfoque nítido, textura realista, encuadre para catálogo de WhatsApp e Instagram, sin texto, sin manos, sin accesorios adicionales.`;
+  return `${S.settings.aiBrandPrompt || AUREA_BRAND_PROMPT}
+
+OBJETIVO DE ESTA IMAGEN
+Crear una fotografía comercial hiperrealista vertical para presentar la manilla “${name}” a un cliente de Aurea.
+
+PRODUCTO
+- Color del hilo: ${thread}.
+- Composición registrada: ${details || 'diseño artesanal minimalista según la fotografía de producto'}.
+- Notas del diseño: ${notes || 'sin notas adicionales'}.
+- Si se adjunta una foto real, debe ser la fuente principal: preservar el producto, sus proporciones, cantidades, orden, colores y detalles. Las demás imágenes adjuntas son referencias de dirección artística, paleta, iluminación y composición; no copies sus productos ni sus textos.
+
+COMPOSICIÓN
+- Producto protagonista, completo, enfocado y visualmente atractivo.
+- Acabado editorial premium para catálogo, Instagram y WhatsApp.
+- Dejar aproximadamente 22% de espacio limpio arriba y 24% abajo para la plantilla de marca.
+- No generar texto, logotipos, teléfono, iconos, sellos ni marcas de agua; Aurea los superpondrá después con precisión.`;
 }
 
-async function generateAIImage() {
-  if (!currentComponents.length) { toast('Primero agrega los materiales de la manilla'); return; }
+function aiErrorMessage(error) {
+  const code = String(error?.code || '').replace(/^functions\//, '');
+  const providerCode = String(error?.details?.providerCode || error?.details || '');
+  const rawMessage = `${code} ${providerCode} ${error?.message || ''}`.toLowerCase();
+  if (code === 'unauthenticated') return 'Activa el acceso autorizado en Firebase Authentication';
+  if (code === 'permission-denied') return 'Tu cuenta o PIN no está autorizado para usar la IA';
+  if (code === 'not-found') return 'Primero despliega la función de IA en Firebase';
+  if (code === 'resource-exhausted' || rawMessage.includes('rate_limit')) return 'Se alcanzó el límite de imágenes; espera un momento antes de intentar de nuevo';
+  if (code === 'deadline-exceeded' || code === 'cancelled') return 'La generación tardó demasiado; puedes volver a intentarlo';
+  if (code === 'invalid-argument' || /(moderation|invalid_prompt|content_policy)/.test(rawMessage)) return 'La solicitud no pudo procesarse. Cambia la instrucción e inténtalo de nuevo';
+  if (/(billing|insufficient_quota)/.test(rawMessage)) return 'Revisa la facturación de OpenAI o Firebase';
+  return 'No fue posible generar la imagen. Revisa Functions y la clave de OpenAI.';
+}
+
+function aiRequestContext(prompt) {
+  return {
+    editingDesignId,
+    prompt,
+    productImageData: currentProductImageData,
+    imageData: currentImageData,
+    responseId: currentAIResponseId,
+    components: JSON.stringify(currentComponents)
+  };
+}
+
+function isSameAIRequestContext(context) {
+  return context.editingDesignId === editingDesignId
+    && context.prompt === buildAIPrompt()
+    && context.productImageData === currentProductImageData
+    && context.imageData === currentImageData
+    && context.responseId === currentAIResponseId
+    && context.components === JSON.stringify(currentComponents);
+}
+
+function setAIRequestControls(disabled) {
+  ['#ai-generate-btn', '#ai-refine-btn', '#ai-prompt-btn', '#upload-image-btn', '#remove-product-image-btn', '#remove-image-btn']
+    .forEach(selector => {
+      const element = $(selector);
+      if (element) element.disabled = disabled;
+    });
+  $$('[data-ai-suggestion], .ai-version').forEach(element => { element.disabled = disabled; });
+}
+
+async function requestAIImage(feedback = '') {
+  if (aiRequestInFlight) {
+    toast('Espera a que termine la imagen actual');
+    return;
+  }
+  const isRefinement = Boolean(feedback && currentImageData);
+  if (!isRefinement && !currentComponents.length && !currentProductImageData) {
+    toast('Agrega materiales o sube una foto real de la manilla');
+    return;
+  }
   if (location.protocol === 'file:') { toast('Para usar IA abre la app con INICIAR_LOCAL.bat o desde Firebase'); return; }
   if (!functionsClient) { toast('Firebase Functions no está disponible'); return; }
-  if (!firebase.auth?.().currentUser) { toast('Activa el acceso anónimo en Firebase Authentication'); return; }
+  if (!firebase.auth?.().currentUser) { toast('Activa Firebase Authentication para usar la IA'); return; }
 
-  const button = $('#ai-generate-btn');
+  const prompt = buildAIPrompt();
+  const requestContext = aiRequestContext(prompt);
+  const requestSequence = ++aiRequestSequence;
+  const button = isRefinement ? $('#ai-refine-btn') : $('#ai-generate-btn');
   const originalText = button.textContent;
+  aiRequestInFlight = true;
+  setAIRequestControls(true);
   button.classList.add('loading');
-  button.textContent = 'Generando…';
+  button.textContent = isRefinement ? 'Mejorando…' : 'Creando…';
   button.disabled = true;
 
   try {
-    const generate = functionsClient.httpsCallable('generateAureaDesignImage');
+    const generate = functionsClient.httpsCallable('generateAureaDesignImage', { timeout: 260_000 });
     const result = await generate({
-      prompt: buildAIPrompt(),
-      model: S.settings.aiModel || 'gpt-image-1',
+      prompt,
+      feedback,
+      previousResponseId: isRefinement ? currentAIResponseId : '',
+      currentImageUrl: isRefinement ? currentImageData : '',
+      productImageData: isRefinement ? '' : currentProductImageData,
+      styleReferenceImages: isRefinement ? [] : (S.settings.aiStyleReferences || []).slice(0, 4),
+      model: S.settings.aiModel || 'gpt-5.6',
       quality: S.settings.aiQuality || 'medium',
-      size: S.settings.aiSize || '1024x1536',
-      accessHash: localStorage.getItem(PIN_KEY) || ''
+      size: S.settings.aiSize || '1024x1536'
     });
     const imageUrl = result?.data?.imageUrl;
     if (!imageUrl) throw new Error('La función no devolvió una imagen');
+    if (requestSequence !== aiRequestSequence || !isSameAIRequestContext(requestContext)) {
+      toast('El diseño cambió mientras se generaba; el resultado no se aplicó');
+      return;
+    }
+
+    const parentVersionId = currentAIVersionId;
     currentImageData = imageUrl;
+    currentAIResponseId = result?.data?.responseId || '';
+    if (isRefinement) currentAIChat.push({ role: 'user', text: feedback, createdAt: Date.now() });
+    else currentAIChat.push({ role: 'user', text: 'Crear una presentación premium con el estilo de Aurea.', createdAt: Date.now() });
+    currentAIChat.push({
+      role: 'assistant',
+      text: isRefinement ? 'Preparé una nueva versión con tus cambios. Puedes seguir pidiéndome ajustes.' : 'Creé la primera versión. Dime qué quieres mejorar.',
+      createdAt: Date.now()
+    });
+    currentAIChat = currentAIChat.slice(-20);
+    const versionId = uid('aiv');
+    const instruction = isRefinement ? feedback : 'Primera presentación con el estilo guardado de Aurea';
+    currentAIVersions.push({
+      id: versionId,
+      parentId: parentVersionId || '',
+      imageUrl,
+      responseId: currentAIResponseId,
+      instruction,
+      chat: currentAIChat.slice(),
+      createdAt: Date.now()
+    });
+    currentAIVersions = currentAIVersions.slice(-8);
+    currentAIVersionId = versionId;
+    $('#ai-feedback-input').value = '';
     renderDesigner();
-    toast('Imagen generada y guardada en el diseño');
+    const autoSaved = saveDesign({ silent: true });
+    toast(isRefinement
+      ? `Nueva versión creada${autoSaved ? ' y guardada' : ''}`
+      : `Presentación creada con IA${autoSaved ? ' y guardada' : ''}`);
   } catch (error) {
     console.error('Generación IA:', error);
-    const rawMessage = error?.message || error?.details || '';
-    const message = rawMessage.includes('unauthenticated') ? 'Activa Authentication anónima en Firebase' :
-      rawMessage.includes('permission-denied') ? 'PIN no autorizado para generar imágenes' :
-      rawMessage.includes('not-found') ? 'Primero despliega la función de IA en Firebase' :
-      rawMessage.includes('resource-exhausted') ? 'Se alcanzó el límite diario de imágenes' :
-      rawMessage.includes('billing') ? 'Revisa la facturación de OpenAI o Firebase' :
-      'No fue posible generar la imagen. Revisa Functions y la clave de OpenAI.';
-    toast(message);
+    toast(aiErrorMessage(error));
   } finally {
+    if (requestSequence === aiRequestSequence) aiRequestInFlight = false;
+    setAIRequestControls(false);
     button.classList.remove('loading');
     button.textContent = originalText;
     button.disabled = false;
   }
 }
 
+function generateAIImage() {
+  return requestAIImage('');
+}
+
+function refineAIImage(instruction = '') {
+  const feedback = String(instruction || $('#ai-feedback-input').value || '').trim();
+  if (!currentImageData) { toast('Primero crea una presentación'); return; }
+  if (feedback.length < 5) { toast('Describe el cambio que quieres hacer'); return; }
+  return requestAIImage(feedback);
+}
+
+function selectAIVersion(index) {
+  const version = currentAIVersions[index];
+  if (!version) return;
+  currentImageData = version.imageUrl;
+  currentAIResponseId = version.responseId || '';
+  currentAIVersionId = version.id || '';
+  if (Array.isArray(version.chat)) currentAIChat = version.chat.slice(-20);
+  renderDesigner();
+  toast(`Versión ${index + 1} seleccionada`);
+}
+
 function showAIPrompt() {
   const prompt = buildAIPrompt();
-  openModal(`<div class="modal-head"><h3>Prompt para generar imagen</h3><button class="modal-close" onclick="closeModal()">×</button></div>
-    <p class="help">Cópialo en tu herramienta de IA, genera la imagen y luego súbela al diseño. La IA puede cambiar cantidades; valida el resultado.</p>
+  openModal(`<div class="modal-head"><h3>Idea visual guardada</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <p class="help">Aurea combina esta dirección de arte con los materiales, la foto real y las notas del diseño. Puedes editar la base desde Gestión → Configuración.</p>
     <div class="prompt-box" id="ai-prompt-text">${esc(prompt)}</div>
-    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button><button class="btn btn-outline" onclick="copyAIPrompt()">Copiar prompt</button><button class="btn btn-primary" onclick="closeModal();generateAIImage()">Generar con IA</button></div>`);
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button><button class="btn btn-outline" onclick="copyAIPrompt()">Copiar idea</button><button class="btn btn-primary" onclick="closeModal();generateAIImage()">Crear con IA</button></div>`);
 }
 
 async function copyAIPrompt() {
@@ -903,26 +1192,30 @@ function readFileAsDataURL(file) {
   });
 }
 
-async function compressImage(file) {
+async function compressImage(file, maxSide = 960, quality = 0.72) {
   if (!file?.type?.startsWith('image/')) throw new Error('Selecciona una imagen válida');
   const dataUrl = await readFileAsDataURL(file);
   const image = new Image();
   await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = dataUrl; });
-  const maxSide = 960;
   const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(image.width * scale));
   canvas.height = Math.max(1, Math.round(image.height * scale));
   const context = canvas.getContext('2d');
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.72);
+  return canvas.toDataURL('image/jpeg', quality);
 }
 
 async function handleDesignImage(file) {
   try {
-    currentImageData = await compressImage(file);
+    currentProductImageData = await compressImage(file, 1200, 0.8);
+    currentImageData = '';
+    currentAIResponseId = '';
+    currentAIVersions = [];
+    currentAIChat = [];
+    currentAIVersionId = '';
     renderDesigner();
-    toast('Imagen cargada y optimizada');
+    toast('Foto real preparada como referencia');
   } catch (error) {
     toast(error.message || 'No fue posible cargar la imagen');
   } finally {
@@ -930,10 +1223,229 @@ async function handleDesignImage(file) {
   }
 }
 
+function removeProductImage() {
+  currentProductImageData = '';
+  currentAIResponseId = '';
+  renderDesigner();
+  toast('Foto de referencia eliminada');
+}
+
 function removeDesignImage() {
   currentImageData = '';
+  currentAIResponseId = '';
+  currentAIVersions = [];
+  currentAIChat = [];
+  currentAIVersionId = '';
   renderDesigner();
-  toast('Imagen eliminada del diseño');
+  toast('Resultado de IA eliminado');
+}
+
+async function handleAIStyleReferences(files) {
+  const available = Math.max(0, 4 - (S.settings.aiStyleReferences || []).length);
+  const selected = [...(files || [])].slice(0, available);
+  if (!selected.length) {
+    toast(available ? 'Selecciona una o más imágenes' : 'Ya tienes cuatro referencias');
+    return;
+  }
+  const button = $('#add-ai-reference-btn');
+  const originalText = button.textContent;
+  button.classList.add('loading');
+  button.textContent = 'Preparando…';
+  try {
+    const references = [];
+    for (const file of selected) references.push(await compressImage(file, 760, 0.68));
+    S.settings.aiStyleReferences = [...(S.settings.aiStyleReferences || []), ...references].slice(0, 4);
+    persist();
+    toast(`${references.length} referencia${references.length === 1 ? '' : 's'} guardada${references.length === 1 ? '' : 's'}`);
+  } catch (error) {
+    toast(error.message || 'No fue posible preparar las referencias');
+  } finally {
+    button.classList.remove('loading');
+    button.textContent = originalText;
+    $('#ai-reference-input').value = '';
+  }
+}
+
+function removeAIStyleReference(index) {
+  S.settings.aiStyleReferences = (S.settings.aiStyleReferences || []).filter((_, itemIndex) => itemIndex !== index);
+  persist();
+  toast('Referencia eliminada');
+}
+
+function loadCanvasImage(src) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      let imageSource = src;
+      let objectUrl = '';
+      if (!String(src).startsWith('data:') && new URL(src, location.href).origin !== location.origin) {
+        const response = await fetch(src);
+        if (!response.ok) throw new Error('No fue posible descargar la imagen generada');
+        objectUrl = URL.createObjectURL(await response.blob());
+        imageSource = objectUrl;
+      }
+      const image = new Image();
+      image.onload = () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        resolve(image);
+      };
+      image.onerror = () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        reject(new Error('No fue posible cargar la imagen'));
+      };
+      image.src = imageSource;
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+function drawImageCover(context, image, width, height) {
+  const scale = Math.max(width / image.width, height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  context.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+}
+
+function wrapCanvasText(context, text, x, y, maxWidth, lineHeight, maxLines = 3) {
+  const words = String(text || '').split(/\s+/);
+  const lines = [];
+  let line = '';
+  words.forEach(word => {
+    const candidate = line ? `${line} ${word}` : word;
+    if (context.measureText(candidate).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  });
+  if (line) lines.push(line);
+  lines.slice(0, maxLines).forEach((item, index) => context.fillText(item, x, y + (index * lineHeight)));
+  return Math.min(lines.length, maxLines);
+}
+
+async function buildAureaPresentationBlob() {
+  if (!currentImageData) throw new Error('Primero crea una presentación');
+  const [widthText, heightText] = String(S.settings.aiSize || '1024x1536').split('x');
+  const width = Math.max(720, Number(widthText) || 1024);
+  const height = Math.max(720, Number(heightText) || 1536);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  const scene = await loadCanvasImage(currentImageData);
+  drawImageCover(context, scene, width, height);
+
+  const theme = S.settings.aiTheme || 'champagne';
+  const overlay = {
+    champagne: ['rgba(19,12,7,.82)', 'rgba(19,12,7,.94)', '#f0c86f', '#b07b28'],
+    rose: ['rgba(91,46,55,.78)', 'rgba(83,43,52,.93)', '#f3d5c5', '#bc7c81'],
+    'black-gold': ['rgba(0,0,0,.9)', 'rgba(0,0,0,.97)', '#efc465', '#a76e18']
+  }[theme] || ['rgba(19,12,7,.82)', 'rgba(19,12,7,.94)', '#f0c86f', '#b07b28'];
+
+  const topGradient = context.createLinearGradient(0, 0, 0, height * 0.38);
+  topGradient.addColorStop(0, overlay[0]);
+  topGradient.addColorStop(1, 'rgba(0,0,0,0)');
+  context.fillStyle = topGradient;
+  context.fillRect(0, 0, width, height * 0.4);
+
+  const bottomGradient = context.createLinearGradient(0, height * 0.58, 0, height);
+  bottomGradient.addColorStop(0, 'rgba(0,0,0,0)');
+  bottomGradient.addColorStop(1, overlay[1]);
+  context.fillStyle = bottomGradient;
+  context.fillRect(0, height * 0.56, width, height * 0.44);
+
+  const logo = await loadCanvasImage('assets/logo-aurea.jpg');
+  const logoSize = Math.round(width * 0.13);
+  const logoX = Math.round(width * 0.07);
+  const logoY = Math.round(height * 0.045);
+  context.save();
+  context.beginPath();
+  context.arc(logoX + logoSize / 2, logoY + logoSize / 2, logoSize / 2, 0, Math.PI * 2);
+  context.clip();
+  context.drawImage(logo, logoX, logoY, logoSize, logoSize);
+  context.restore();
+  context.strokeStyle = overlay[2];
+  context.lineWidth = Math.max(2, width * 0.002);
+  context.beginPath();
+  context.arc(logoX + logoSize / 2, logoY + logoSize / 2, logoSize / 2, 0, Math.PI * 2);
+  context.stroke();
+
+  const brandX = logoX + logoSize + width * 0.025;
+  context.fillStyle = overlay[2];
+  context.font = `${Math.round(width * 0.055)}px Georgia, serif`;
+  context.fillText('A U R E A', brandX, logoY + logoSize * 0.54);
+  context.fillStyle = '#fff4df';
+  context.font = `${Math.round(width * 0.016)}px Arial, sans-serif`;
+  context.fillText('JOYAS HECHAS CON AMOR, BRILLO Y ESENCIA', brandX, logoY + logoSize * 0.78);
+
+  context.fillStyle = '#ffffff';
+  context.font = `${Math.round(width * 0.072)}px Georgia, serif`;
+  const headlineY = Math.round(height * 0.21);
+  const headlineLines = wrapCanvasText(context, S.settings.aiHeadline || DEFAULT_SETTINGS.aiHeadline, width * 0.07, headlineY, width * 0.76, width * 0.078, 3);
+  context.fillStyle = '#fff4e3';
+  context.font = `${Math.round(width * 0.026)}px Arial, sans-serif`;
+  wrapCanvasText(context, S.settings.aiCaption || DEFAULT_SETTINGS.aiCaption, width * 0.07, headlineY + headlineLines * width * 0.078 + height * 0.014, width * 0.68, width * 0.035, 2);
+
+  const benefits = brandBenefits().slice(0, 4);
+  const benefitY = height * 0.82;
+  const benefitWidth = width * 0.86 / Math.max(1, benefits.length);
+  context.textAlign = 'center';
+  benefits.forEach((benefit, index) => {
+    const x = width * 0.07 + benefitWidth * index + benefitWidth / 2;
+    context.fillStyle = overlay[2];
+    context.font = `${Math.round(width * 0.032)}px Georgia, serif`;
+    context.fillText('✦', x, benefitY);
+    context.fillStyle = '#fff8ed';
+    context.font = `${Math.round(width * 0.019)}px Arial, sans-serif`;
+    wrapCanvasText(context, benefit, x, benefitY + height * 0.025, benefitWidth * 0.86, width * 0.026, 2);
+  });
+  context.textAlign = 'left';
+
+  const phone = S.settings.aiWhatsapp || DEFAULT_SETTINGS.aiWhatsapp;
+  context.font = `700 ${Math.round(width * 0.037)}px Arial, sans-serif`;
+  const phoneWidth = context.measureText(phone).width;
+  const pillWidth = phoneWidth + width * 0.2;
+  const pillHeight = height * 0.057;
+  const pillX = (width - pillWidth) / 2;
+  const pillY = height * 0.918;
+  const pillGradient = context.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+  pillGradient.addColorStop(0, overlay[3]);
+  pillGradient.addColorStop(1, overlay[2]);
+  context.fillStyle = pillGradient;
+  context.beginPath();
+  context.roundRect(pillX, pillY, pillWidth, pillHeight, pillHeight / 2);
+  context.fill();
+  context.fillStyle = '#fff';
+  context.font = `${Math.round(width * 0.016)}px Arial, sans-serif`;
+  context.fillText('WHATSAPP', pillX + width * 0.045, pillY + pillHeight * 0.58);
+  context.font = `700 ${Math.round(width * 0.037)}px Arial, sans-serif`;
+  context.fillText(phone, pillX + width * 0.14, pillY + pillHeight * 0.66);
+
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('No fue posible preparar la descarga')), 'image/jpeg', 0.92));
+}
+
+async function downloadAureaPresentation() {
+  const button = $('#download-presentation-btn');
+  const originalText = button.textContent;
+  button.classList.add('loading');
+  button.textContent = 'Preparando…';
+  try {
+    const blob = await buildAureaPresentationBlob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const name = ($('#design-name').value.trim() || 'diseno-aurea').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    link.href = url;
+    link.download = `aurea-${name || 'presentacion'}.jpg`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast('Publicidad descargada');
+  } catch (error) {
+    toast(error.message || 'No fue posible descargar la publicidad');
+  } finally {
+    button.classList.remove('loading');
+    button.textContent = originalText;
+  }
 }
 
 function saleCard(sale, withActions = true) {
@@ -1216,9 +1728,28 @@ function renderSettings() {
   $('#set-margin-rec').value = number(S.settings.marginRec);
   $('#set-margin-premium').value = number(S.settings.marginPremium);
   $('#set-round').value = String(number(S.settings.roundTo));
-  $('#set-ai-model').value = S.settings.aiModel || 'gpt-image-1';
+  $('#set-ai-model').value = S.settings.aiModel || 'gpt-5.6';
   $('#set-ai-quality').value = S.settings.aiQuality || 'medium';
   $('#set-ai-size').value = S.settings.aiSize || '1024x1536';
+  $('#set-ai-theme').value = S.settings.aiTheme || 'champagne';
+  $('#set-ai-brand-prompt').value = S.settings.aiBrandPrompt || AUREA_BRAND_PROMPT;
+  $('#set-ai-headline').value = S.settings.aiHeadline || DEFAULT_SETTINGS.aiHeadline;
+  $('#set-ai-caption').value = S.settings.aiCaption || DEFAULT_SETTINGS.aiCaption;
+  $('#set-ai-whatsapp').value = S.settings.aiWhatsapp || DEFAULT_SETTINGS.aiWhatsapp;
+  $('#set-ai-benefits').value = S.settings.aiBenefits || DEFAULT_SETTINGS.aiBenefits;
+  renderAIReferenceSettings();
+}
+
+function renderAIReferenceSettings() {
+  const grid = $('#ai-reference-grid');
+  if (!grid) return;
+  const references = S.settings.aiStyleReferences || [];
+  grid.innerHTML = references.length ? references.map((src, index) => `
+    <div class="ai-reference"><img src="${esc(src)}" alt="Referencia visual ${index + 1}"><button type="button" onclick="removeAIStyleReference(${index})" aria-label="Eliminar referencia ${index + 1}">×</button></div>
+  `).join('') : '<div class="ai-reference-empty">Todavía no hay fotos de referencia. Puedes subir aquí las imágenes de presentación que compartiste.</div>';
+  const button = $('#add-ai-reference-btn');
+  button.disabled = references.length >= 4;
+  button.textContent = references.length >= 4 ? 'Máximo alcanzado' : 'Agregar fotos';
 }
 
 function saveSettings() {
@@ -1228,7 +1759,13 @@ function saveSettings() {
     roundTo: number($('#set-round').value),
     aiModel: $('#set-ai-model').value,
     aiQuality: $('#set-ai-quality').value,
-    aiSize: $('#set-ai-size').value
+    aiSize: $('#set-ai-size').value,
+    aiTheme: $('#set-ai-theme').value,
+    aiBrandPrompt: $('#set-ai-brand-prompt').value.trim() || AUREA_BRAND_PROMPT,
+    aiHeadline: $('#set-ai-headline').value.trim() || DEFAULT_SETTINGS.aiHeadline,
+    aiCaption: $('#set-ai-caption').value.trim() || DEFAULT_SETTINGS.aiCaption,
+    aiWhatsapp: $('#set-ai-whatsapp').value.trim() || DEFAULT_SETTINGS.aiWhatsapp,
+    aiBenefits: $('#set-ai-benefits').value.trim() || DEFAULT_SETTINGS.aiBenefits
   };
   if ([next.marginMin, next.marginRec, next.marginPremium].some(value => value >= 95 || value < 0)) { toast('Los márgenes deben estar entre 0% y 94%'); return; }
   if (!(next.marginMin <= next.marginRec && next.marginRec <= next.marginPremium)) { toast('Los márgenes deben ir de menor a mayor'); return; }
@@ -1279,9 +1816,13 @@ function bindEvents() {
   $('#saved-designs').onchange = event => event.target.value ? loadDesign(event.target.value) : resetDesign();
   $('#upload-image-btn').onclick = () => $('#design-image-input').click();
   $('#design-image-input').onchange = event => handleDesignImage(event.target.files?.[0]);
+  $('#remove-product-image-btn').onclick = removeProductImage;
   $('#remove-image-btn').onclick = removeDesignImage;
+  $('#download-presentation-btn').onclick = downloadAureaPresentation;
   $('#ai-prompt-btn').onclick = showAIPrompt;
   $('#ai-generate-btn').onclick = generateAIImage;
+  $('#ai-refine-btn').onclick = () => refineAIImage();
+  $$('[data-ai-suggestion]').forEach(button => { button.onclick = () => refineAIImage(button.dataset.aiSuggestion); });
 
   $('#sale-search').oninput = renderSales;
   $('#sale-status').onchange = renderSales;
@@ -1289,8 +1830,12 @@ function bindEvents() {
   $('#new-expense-btn').onclick = () => openExpense();
 
   $('#save-settings-btn').onclick = saveSettings;
+  $('#add-ai-reference-btn').onclick = () => $('#ai-reference-input').click();
+  $('#ai-reference-input').onchange = event => handleAIStyleReferences(event.target.files);
   $('#change-pin-btn').onclick = changePin;
   $('#lock-btn').onclick = lock;
+  $('#google-signin-btn').onclick = signInWithGoogle;
+  $('#google-signout-btn').onclick = signOutGoogle;
   $('#modal-backdrop').onclick = event => { if (event.target.id === 'modal-backdrop') closeModal(); };
 
   window.addEventListener('beforeinstallprompt', event => {
@@ -1315,7 +1860,8 @@ Object.assign(window, {
   openSale, saveSale, cancelSale, deleteSale,
   openCustomer, saveCustomer, toggleCustomer, deleteCustomer,
   openExpense, saveExpense, deleteExpense,
-  copyAIPrompt, generateAIImage
+  copyAIPrompt, generateAIImage, refineAIImage, selectAIVersion,
+  removeAIStyleReference, downloadAureaPresentation
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1323,9 +1869,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindEvents();
   renderAll();
   if (location.protocol === 'file:') $('#local-warning')?.classList.remove('hidden');
-  await initFirebase();
+  const firebaseReady = await initFirebase();
+  if (!firebaseReady) return;
   if (sessionStorage.getItem('aurea_unlocked') === '1') $('#pin-screen').classList.add('hidden');
   else await initPIN();
   renderAll();
+  const requestedView = new URLSearchParams(location.search).get('view');
+  const requestedTab = new URLSearchParams(location.search).get('tab') || '';
+  if (['home', 'inventory', 'designer', 'sales', 'management'].includes(requestedView)) showView(requestedView, requestedTab);
   if (location.protocol !== 'file:' && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(console.warn);
 });

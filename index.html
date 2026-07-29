@@ -15,6 +15,17 @@
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+  <section class="auth-screen" id="auth-screen" aria-label="Ingreso privado con Google">
+    <div class="auth-card">
+      <img src="assets/logo-aurea.jpg" class="pin-logo" alt="Logo Aurea">
+      <div class="pin-title">AUREA</div>
+      <h1>Acceso privado</h1>
+      <p>Ingresa con una cuenta de Google autorizada para sincronizar la gestión y usar el estudio creativo.</p>
+      <button class="btn btn-primary btn-block" id="google-signin-btn">Continuar con Google</button>
+      <span class="auth-help" id="auth-help">Tus datos y la clave de IA no quedan públicos.</span>
+    </div>
+  </section>
+
   <section class="pin-screen" id="pin-screen" aria-label="Acceso Aurea">
     <div class="pin-card">
       <img src="assets/logo-aurea.jpg" class="pin-logo" alt="Logo Aurea">
@@ -118,18 +129,75 @@
               <div id="component-list" class="components" style="margin-top:12px"></div>
             </div>
 
-            <div class="card">
+            <div class="card ai-studio">
               <div class="inline spread preview-head">
-                <div><b class="serif card-title">Imagen del diseño</b><span class="help block">Puedes subir una foto hecha en otra aplicación o una fotografía real.</span></div>
-                <div class="inline actions-wrap">
+                <div><b class="serif card-title">Estudio creativo con IA</b><span class="help block">Crea una presentación y conversa con Aurea hasta dejarla lista para el cliente.</span></div>
+                <button class="btn btn-outline btn-sm" id="ai-prompt-btn">Ver idea guardada</button>
+              </div>
+
+              <div class="ai-source-grid">
+                <div class="ai-source-box">
+                  <div><b>1. Foto real del producto</b><span class="help block">Recomendada para conservar exactamente la manilla.</span></div>
                   <input type="file" id="design-image-input" accept="image/*" class="hidden">
-                  <button class="btn btn-soft btn-sm" id="upload-image-btn">Subir foto</button>
-                  <button class="btn btn-outline btn-sm" id="remove-image-btn">Quitar</button>
-                  <button class="btn btn-outline btn-sm" id="ai-prompt-btn">Ver prompt</button>
-                  <button class="btn btn-primary btn-sm" id="ai-generate-btn">Generar con IA</button>
+                  <div class="inline actions-wrap">
+                    <button class="btn btn-soft btn-sm" id="upload-image-btn">Subir foto real</button>
+                    <button class="btn btn-outline btn-sm hidden" id="remove-product-image-btn">Quitar foto</button>
+                  </div>
+                  <div class="product-reference hidden" id="product-reference-wrap"><img id="product-reference-preview" alt="Foto real de la manilla"></div>
+                </div>
+                <div class="ai-source-box">
+                  <div><b>2. Estilo de Aurea</b><span class="help block" id="ai-style-summary">Usará la identidad champaña, rosa y negro dorado.</span></div>
+                  <button class="btn btn-outline btn-sm" type="button" data-go="management" data-tab="settings">Configurar referencias</button>
                 </div>
               </div>
-              <div class="image-preview-wrap hidden" id="design-image-wrap"><img id="design-image-preview" alt="Imagen del diseño"></div>
+
+              <div class="ai-create-bar">
+                <div><b>3. Crear la presentación</b><span class="help block">La escena se genera sin letras; la app coloca la marca y el WhatsApp correctamente.</span></div>
+                <button class="btn btn-primary" id="ai-generate-btn">✨ Crear con IA</button>
+              </div>
+
+              <div class="aurea-poster-shell hidden" id="design-image-wrap">
+                <div class="aurea-poster theme-champagne" id="aurea-poster-preview">
+                  <img id="design-image-preview" alt="Presentación generada por Aurea">
+                  <div class="poster-top">
+                    <img class="poster-logo" src="assets/logo-aurea.jpg" alt="">
+                    <div><b class="poster-brand-name">AUREA</b><span class="poster-tagline">Joyas hechas con amor, brillo y esencia</span></div>
+                  </div>
+                  <div class="poster-copy">
+                    <strong id="poster-headline">Detalles que hablan de ti</strong>
+                    <span id="poster-caption">Una joya especial para un momento inolvidable.</span>
+                  </div>
+                  <div class="poster-bottom">
+                    <div class="poster-benefits" id="poster-benefits"></div>
+                    <div class="poster-whatsapp"><span>WhatsApp</span><b id="poster-whatsapp">324 234 3363</b></div>
+                  </div>
+                </div>
+                <div class="poster-actions">
+                  <button class="btn btn-outline btn-sm" id="remove-image-btn">Quitar resultado</button>
+                  <button class="btn btn-soft btn-sm" id="download-presentation-btn">Descargar publicidad</button>
+                </div>
+              </div>
+
+              <div class="ai-versions hidden" id="ai-versions-wrap">
+                <div class="inline spread"><b>Versiones</b><span class="help">Puedes volver a cualquiera</span></div>
+                <div class="ai-version-strip" id="ai-version-strip"></div>
+              </div>
+
+              <div class="ai-chat hidden" id="ai-chat">
+                <div class="inline spread"><div><b>Hablar con la IA</b><span class="help block">Describe solo lo que quieres corregir.</span></div><span class="ai-chat-status">Edición conversacional</span></div>
+                <div class="ai-chat-messages" id="ai-chat-messages"></div>
+                <div class="ai-suggestions">
+                  <button type="button" data-ai-suggestion="Conserva exactamente la manilla y sus materiales; mejora únicamente la iluminación y el fondo.">Conservar producto</button>
+                  <button type="button" data-ai-suggestion="Haz el fondo más elegante, cálido y premium, con tonos champaña y detalles dorados sutiles.">Fondo más elegante</button>
+                  <button type="button" data-ai-suggestion="Da más protagonismo a la manilla, mejora el enfoque y reduce los elementos decorativos.">Resaltar manilla</button>
+                  <button type="button" data-ai-suggestion="Cambia la dirección de arte a rosa empolvado, delicada y romántica, conservando el producto.">Versión rosada</button>
+                </div>
+                <div class="ai-chat-compose">
+                  <textarea class="input" id="ai-feedback-input" rows="2" placeholder="Ej. Conserva la manilla, cambia el fondo a rosa claro y agrega una tela satinada..."></textarea>
+                  <button class="btn btn-primary" id="ai-refine-btn">Mejorar imagen</button>
+                </div>
+              </div>
+
               <div class="inline spread preview-head secondary-preview"><b class="serif card-title">Boceto automático</b><span class="help">Vista aproximada según materiales</span></div>
               <div class="bracelet-preview"><div class="bracelet-line" id="bracelet-line"></div></div>
             </div>
@@ -209,20 +277,34 @@
           </div>
           <div class="card settings-group">
             <h3 class="settings-title">Generación de imágenes con IA</h3>
-            <p class="help">La clave de OpenAI se guarda como secreto en Firebase Functions; nunca queda dentro de la PWA.</p>
-            <div class="setting-row"><div class="setting-label"><b>Modelo</b><span>Calidad y costo de generación.</span></div><select class="input" id="set-ai-model"><option value="gpt-image-1">GPT Image 2</option><option value="gpt-image-1">GPT Image 1.5</option><option value="gpt-image-1-mini">GPT Image 1 Mini</option></select></div>
+            <p class="help">La clave de OpenAI se guarda como secreto en Firebase Functions; nunca queda dentro de la PWA. El estudio usa una conversación para mejorar la misma imagen.</p>
+            <div class="setting-row"><div class="setting-label"><b>Motor creativo</b><span>Responses API + GPT Image 2 para edición conversacional.</span></div><select class="input" id="set-ai-model"><option value="gpt-5.6">GPT-5.6 + GPT Image 2</option></select></div>
             <div class="setting-row"><div class="setting-label"><b>Calidad</b><span>Media es el equilibrio inicial recomendado.</span></div><select class="input" id="set-ai-quality"><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></select></div>
             <div class="setting-row"><div class="setting-label"><b>Formato</b><span>Vertical para publicaciones o cuadrado para catálogo.</span></div><select class="input" id="set-ai-size"><option value="1024x1536">Vertical 1024 × 1536</option><option value="1024x1024">Cuadrado 1024 × 1024</option><option value="1536x1024">Horizontal 1536 × 1024</option></select></div>
+            <div class="setting-row"><div class="setting-label"><b>Estilo de la plantilla</b><span>Controla los colores de la marca sobre la foto.</span></div><select class="input" id="set-ai-theme"><option value="champagne">Champaña y dorado</option><option value="rose">Rosa delicado</option><option value="black-gold">Negro y dorado</option></select></div>
+            <div class="field"><label>Idea visual guardada</label><textarea class="input" id="set-ai-brand-prompt" rows="6"></textarea><span class="help">Se combina automáticamente con los materiales y las notas de cada diseño.</span></div>
+            <div class="form-grid two" style="margin-top:12px">
+              <div class="field"><label>Titular</label><input class="input" id="set-ai-headline" maxlength="70"></div>
+              <div class="field"><label>Texto corto</label><input class="input" id="set-ai-caption" maxlength="110"></div>
+              <div class="field"><label>WhatsApp</label><input class="input" id="set-ai-whatsapp" inputmode="tel" maxlength="25"></div>
+              <div class="field"><label>Beneficios, separados por |</label><input class="input" id="set-ai-benefits" maxlength="180"></div>
+            </div>
+            <div class="ai-reference-settings">
+              <div class="inline spread"><div><b>Referencias visuales de Aurea</b><span class="help block">Sube hasta cuatro ejemplos; la IA tomará el estilo, no sus textos.</span></div><button class="btn btn-outline btn-sm" id="add-ai-reference-btn" type="button">Agregar fotos</button></div>
+              <input type="file" id="ai-reference-input" accept="image/*" multiple class="hidden">
+              <div class="ai-reference-grid" id="ai-reference-grid"></div>
+            </div>
           </div>
           <button class="btn btn-primary btn-block" id="save-settings-btn">Guardar parámetros</button>
           <div class="card settings-group" style="margin-top:14px">
             <h3 class="settings-title">Seguridad y acceso</h3>
-            <p class="help">El mismo PIN protege Aurea desde GomezHub y como PWA independiente.</p>
+            <p class="help">Google controla quién puede sincronizar y usar IA. El mismo PIN protege Aurea desde GomezHub y como PWA independiente.</p>
+            <div class="account-row"><div><b>Cuenta conectada</b><span class="help block" id="connected-account">Sin conexión</span></div><button class="btn btn-outline btn-sm" id="google-signout-btn">Cerrar sesión</button></div>
             <div class="form-grid two" style="margin-top:10px"><div class="field"><label>Nuevo PIN</label><input class="input" id="new-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div><div class="field"><label>Confirmar PIN</label><input class="input" id="confirm-pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••"></div></div>
             <button class="btn btn-dark btn-block" id="change-pin-btn" style="margin-top:10px">Cambiar PIN</button>
             <button class="btn btn-outline btn-block" id="lock-btn" style="margin-top:8px">Bloquear ahora</button>
           </div>
-          <div class="card" style="margin-top:14px"><a class="btn btn-outline btn-block" href="../index.html">Volver a GomezHub</a></div>
+          <div class="card" style="margin-top:14px"><a class="btn btn-outline btn-block" href="https://gomez-hub.web.app/">Volver a GomezHub</a></div>
         </section>
       </section>
     </main>
