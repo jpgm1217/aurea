@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#090705">
-  <meta name="description" content="Gestión de inventario, diseños, compras, ventas, clientes y gastos de Aurea.">
+  <meta name="description" content="Gestión de materiales, producción, manillas terminadas, ventas, pagos y rentabilidad de Aurea.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Aurea">
@@ -69,6 +69,7 @@
           <div class="quick-actions">
             <button class="quick" data-go="designer"><strong>＋ Diseñar manilla</strong><span>Materiales y precio sugerido</span></button>
             <button class="quick" data-go="inventory"><strong>＋ Registrar compra</strong><span>Actualizar stock y costos</span></button>
+            <button class="quick" data-go="management" data-tab="production"><strong>＋ Fabricar manillas</strong><span>Convertir materiales en producto listo</span></button>
             <button class="quick" data-action="new-sale"><strong>＋ Registrar venta</strong><span>Ingreso y utilidad</span></button>
             <button class="quick" data-go="management" data-tab="expenses"><strong>＋ Registrar gasto</strong><span>Control de utilidad neta</span></button>
           </div>
@@ -79,13 +80,15 @@
           <button class="btn btn-primary btn-sm" id="install-btn">Instalar</button>
         </div>
 
-        <div class="stats stats-six">
+        <div class="stats stats-eight">
           <div class="stat"><div class="stat-label">Ventas del mes</div><div class="stat-value money" id="stat-sales">$0</div><div class="stat-note" id="stat-sales-count">0 ventas</div></div>
           <div class="stat"><div class="stat-label">Utilidad bruta</div><div class="stat-value money" id="stat-profit">$0</div><div class="stat-note">Ventas menos costo</div></div>
           <div class="stat"><div class="stat-label">Gastos del mes</div><div class="stat-value money" id="stat-expenses">$0</div><div class="stat-note">Gastos operativos</div></div>
           <div class="stat"><div class="stat-label">Utilidad neta</div><div class="stat-value money" id="stat-net">$0</div><div class="stat-note">Utilidad menos gastos</div></div>
-          <div class="stat"><div class="stat-label">Inventario</div><div class="stat-value money" id="stat-inventory">$0</div><div class="stat-note" id="stat-units">0 unidades</div></div>
-          <div class="stat"><div class="stat-label">Stock bajo</div><div class="stat-value" id="stat-low">0</div><div class="stat-note">Referencias por comprar</div></div>
+          <div class="stat"><div class="stat-label">Inventario total</div><div class="stat-value money" id="stat-inventory">$0</div><div class="stat-note" id="stat-units">0 insumos · 0 manillas</div></div>
+          <div class="stat"><div class="stat-label">Stock bajo</div><div class="stat-value" id="stat-low">0</div><div class="stat-note">Insumos y productos por reponer</div></div>
+          <div class="stat"><div class="stat-label">Dinero recibido</div><div class="stat-value money" id="stat-collected">$0</div><div class="stat-note">Pagos de ventas activas</div></div>
+          <div class="stat"><div class="stat-label">Cartera pendiente</div><div class="stat-value money" id="stat-receivables">$0</div><div class="stat-note">Saldo por cobrar</div></div>
         </div>
 
         <div class="section-head"><div><h2>Actividad reciente</h2><p>Últimas ventas registradas</p></div></div>
@@ -117,14 +120,16 @@
           <div class="composer">
             <div class="card form-grid two">
               <div class="field"><label>Nombre del diseño</label><input class="input" id="design-name" placeholder="Ej. Aurea Clásica Negra"></div>
+              <div class="field"><label>Código / SKU</label><input class="input" id="design-sku" maxlength="30" placeholder="Se genera automáticamente"></div>
               <div class="field"><label>Color del hilo</label><select class="input" id="thread-color"><option>Negro</option><option>Rojo</option><option>Beige</option><option>Rosado</option><option>Blanco</option><option>Azul</option><option>Otro</option></select></div>
+              <div class="field"><label>Stock mínimo terminado</label><input class="input" id="design-min-stock" type="number" min="0" step="1" value="0"></div>
               <div class="field full"><label>Descripción / notas</label><textarea class="input" id="design-notes" placeholder="Detalles del diseño, talla, inspiración o instrucciones"></textarea></div>
             </div>
 
             <div class="card">
               <div class="field">
                 <label>Agregar material</label>
-                <div class="component-adder"><select class="input" id="component-material"></select><input class="input qty" id="component-qty" type="number" min="1" value="1"><button class="btn btn-primary" id="add-component-btn">Agregar</button></div>
+                <div class="component-adder"><select class="input" id="component-material"></select><input class="input qty" id="component-qty" type="number" min="0.01" step="0.01" value="1"><button class="btn btn-primary" id="add-component-btn">Agregar</button></div>
               </div>
               <div id="component-list" class="components" style="margin-top:12px"></div>
             </div>
@@ -216,6 +221,7 @@
             <div class="card">
               <b class="serif card-title">Precios sugeridos</b>
               <div class="pricing-grid" style="margin-top:12px"><div class="price-box"><small>Mínimo</small><b id="price-min">$0</b></div><div class="price-box recommended"><small>Recomendado</small><b id="price-rec">$0</b></div><div class="price-box"><small>Premium</small><b id="price-premium">$0</b></div></div>
+              <div class="operational-summary" id="product-operational-summary"></div>
               <div class="modal-actions design-actions">
                 <button class="btn btn-soft" id="share-design-btn">WhatsApp</button>
                 <button class="btn btn-primary" id="save-design-btn">Guardar</button>
@@ -237,18 +243,32 @@
       </section>
 
       <section class="view" id="view-management">
-        <div class="section-head"><div><h2>Gestión</h2><p>Compras, clientes, gastos, movimientos y parámetros</p></div></div>
+        <div class="section-head"><div><h2>Gestión</h2><p>Producción, compras, cartera, clientes, gastos y trazabilidad</p></div></div>
         <div class="tabs" id="management-tabs">
-          <button class="tab active" data-mtab="purchases">Compras</button>
+          <button class="tab active" data-mtab="production">Producción</button>
+          <button class="tab" data-mtab="purchases">Compras</button>
+          <button class="tab" data-mtab="receivables">Cartera</button>
           <button class="tab" data-mtab="customers">Clientes</button>
           <button class="tab" data-mtab="expenses">Gastos</button>
           <button class="tab" data-mtab="movements">Movimientos</button>
           <button class="tab" data-mtab="settings">Ajustes</button>
         </div>
 
-        <section class="management-panel active" id="panel-purchases">
+        <section class="management-panel active" id="panel-production">
+          <div class="section-head compact"><div><h3>Productos terminados</h3><p>Fabrica manillas, revisa existencias y consulta lotes</p></div></div>
+          <div id="product-stock-list" class="product-stock-grid"></div>
+          <div class="section-head compact"><div><h3>Historial de producción</h3><p>Costos y cantidades congelados por lote</p></div></div>
+          <div id="production-list"></div>
+        </section>
+
+        <section class="management-panel" id="panel-purchases">
           <div class="section-head compact"><div><h3>Compras</h3><p>Historial de entradas de inventario</p></div><button class="btn btn-primary btn-sm" id="new-purchase-btn">＋ Compra</button></div>
           <div id="purchases-list"></div>
+        </section>
+
+        <section class="management-panel" id="panel-receivables">
+          <div class="section-head compact"><div><h3>Cartera</h3><p>Pagos, abonos y saldos pendientes</p></div></div>
+          <div id="receivables-list"></div>
         </section>
 
         <section class="management-panel" id="panel-customers">
@@ -300,6 +320,11 @@
           </div>
           <button class="btn btn-primary btn-block" id="save-settings-btn">Guardar parámetros</button>
           <div class="card settings-group" style="margin-top:14px">
+            <h3 class="settings-title">Copia de seguridad</h3>
+            <p class="help">Descarga un archivo JSON con materiales, recetas, lotes, ventas, pagos y configuración.</p>
+            <button class="btn btn-outline btn-block" id="download-backup-btn" type="button">Descargar respaldo</button>
+          </div>
+          <div class="card settings-group" style="margin-top:14px">
             <h3 class="settings-title">Seguridad y acceso</h3>
             <p class="help">Google controla quién puede sincronizar y usar IA. El mismo PIN protege Aurea desde GomezHub y como PWA independiente.</p>
             <div class="account-row"><div><b>Cuenta conectada</b><span class="help block" id="connected-account">Sin conexión</span></div><button class="btn btn-outline btn-sm" id="google-signout-btn">Cerrar sesión</button></div>
@@ -329,6 +354,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-functions-compat.js"></script>
+  <script src="js/domain.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

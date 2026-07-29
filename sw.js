@@ -1,10 +1,11 @@
 const CACHE_PREFIX = 'aurea-pwa-';
-const CACHE = `${CACHE_PREFIX}v8-chatgpt-manual`;
+const CACHE = `${CACHE_PREFIX}v10-stable-operations`;
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
   './css/styles.css',
+  './js/domain.js',
   './js/app.js',
   './assets/logo-aurea.jpg',
   './assets/icon-192.png',

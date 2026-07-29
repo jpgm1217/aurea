@@ -1,7 +1,7 @@
 {
   "name": "Aurea - Gestión de Joyas",
   "short_name": "Aurea",
-  "description": "Inventario, diseño, precios y ventas de manillas Aurea",
+  "description": "Materiales, producción, inventario terminado, ventas y cartera de manillas Aurea",
   "id": "./",
   "start_url": "./",
   "scope": "./",
