@@ -84,6 +84,7 @@ let currentAIResponseId = '';
 let currentAIVersions = [];
 let currentAIChat = [];
 let currentAIVersionId = '';
+let pendingManualFeedback = '';
 let aiRequestInFlight = false;
 let aiRequestSequence = 0;
 let editingMaterialId = null;
@@ -871,7 +872,7 @@ function renderAIChat() {
   chat.classList.toggle('hidden', !currentImageData);
   messages.innerHTML = currentAIChat.length ? currentAIChat.map(message => `
     <div class="ai-message ${message.role === 'user' ? 'user' : 'assistant'}">${esc(message.text)}</div>`).join('') :
-    '<div class="ai-message assistant">La primera versión está lista. Dime qué quieres cambiar y conservaré el contexto del diseño.</div>';
+    '<div class="ai-message assistant">La imagen está importada. Escribe qué quieres cambiar, copia la corrección y pégala en la misma conversación de ChatGPT.</div>';
   messages.scrollTop = messages.scrollHeight;
 }
 
@@ -884,6 +885,7 @@ function resetDesign() {
   currentAIVersions = [];
   currentAIChat = [];
   currentAIVersionId = '';
+  pendingManualFeedback = '';
   $('#design-name').value = '';
   $('#thread-color').value = 'Negro';
   $('#design-notes').value = '';
@@ -1174,10 +1176,12 @@ function selectAIVersion(index) {
 
 function showAIPrompt() {
   const prompt = buildAIPrompt();
-  openModal(`<div class="modal-head"><h3>Idea visual guardada</h3><button class="modal-close" onclick="closeModal()">×</button></div>
-    <p class="help">Aurea combina esta dirección de arte con los materiales, la foto real y las notas del diseño. Puedes editar la base desde Gestión → Configuración.</p>
+  const referenceCount = (S.settings.aiStyleReferences || []).length;
+  openModal(`<div class="modal-head"><h3>Crear la imagen con ChatGPT</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="warning"><b>Pasos:</b><br>1. Copia y abre ChatGPT.<br>2. Adjunta la foto real del producto${referenceCount ? ` y tus ${referenceCount} referencia${referenceCount === 1 ? '' : 's'} visual${referenceCount === 1 ? '' : 'es'}` : ''}.<br>3. Pega este prompt y genera la imagen.<br>4. Descárgala sin textos y vuelve a Aurea para importarla.</div>
+    <p class="help">Aurea añadirá después el logo, los textos y WhatsApp para que queden escritos correctamente.</p>
     <div class="prompt-box" id="ai-prompt-text">${esc(prompt)}</div>
-    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button><button class="btn btn-outline" onclick="copyAIPrompt()">Copiar idea</button><button class="btn btn-primary" onclick="closeModal();generateAIImage()">Crear con IA</button></div>`);
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cerrar</button><button class="btn btn-outline" onclick="copyAIPrompt()">Copiar prompt</button><button class="btn btn-primary" onclick="copyAIPromptAndOpenChatGPT()">Copiar y abrir ChatGPT</button></div>`);
 }
 
 async function copyAIPrompt() {
@@ -1185,8 +1189,63 @@ async function copyAIPrompt() {
   try {
     await navigator.clipboard.writeText(prompt);
     toast('Prompt copiado');
+    return true;
   } catch (error) {
     toast('No fue posible copiar; selecciónalo manualmente');
+    return false;
+  }
+}
+
+function openChatGPT() {
+  window.open('https://chatgpt.com/', '_blank', 'noopener');
+}
+
+async function copyAIPromptAndOpenChatGPT() {
+  const copied = await copyAIPrompt();
+  if (!copied) return;
+  closeModal();
+  openChatGPT();
+}
+
+function prepareManualAI() {
+  if (!currentComponents.length && !currentProductImageData) {
+    toast('Agrega materiales o sube una foto real de la manilla');
+    return;
+  }
+  showAIPrompt();
+}
+
+function buildManualRefinementPrompt(feedback) {
+  return `Vamos a mejorar la última imagen de esta misma conversación para AUREA.
+
+CAMBIO SOLICITADO
+${feedback}
+
+DEBES CONSERVAR
+- La manilla real: forma, tejido, materiales, cantidades, orden, colores y proporciones.
+- El encuadre comercial y la apariencia fotográfica premium.
+- Espacio limpio arriba y abajo para que Aurea añada su plantilla.
+
+IMPORTANTE
+- Modifica únicamente lo solicitado.
+- No agregues letras, logotipos, números, teléfono, sellos, iconos ni marcas de agua.
+- Devuelve una nueva versión de la imagen lista para descargar.
+- Si no puedes ver la última imagen, pídeme que la adjunte nuevamente.`;
+}
+
+async function prepareManualRefinement(instruction = '') {
+  const feedback = String(instruction || $('#ai-feedback-input').value || '').trim();
+  if (!currentImageData) { toast('Primero importa una presentación'); return; }
+  if (feedback.length < 5) { toast('Describe el cambio que quieres hacer'); return; }
+  pendingManualFeedback = feedback;
+  try {
+    await navigator.clipboard.writeText(buildManualRefinementPrompt(feedback));
+    toast('Corrección copiada; pégala en la misma conversación de ChatGPT');
+  } catch (error) {
+    openModal(`<div class="modal-head"><h3>Corrección para ChatGPT</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+      <p class="help">Copia este mensaje y pégalo en la misma conversación donde generaste la imagen.</p>
+      <div class="prompt-box">${esc(buildManualRefinementPrompt(feedback))}</div>
+      <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Listo</button></div>`);
   }
 }
 
@@ -1227,6 +1286,54 @@ async function handleDesignImage(file) {
     toast(error.message || 'No fue posible cargar la imagen');
   } finally {
     $('#design-image-input').value = '';
+  }
+}
+
+async function handleAIResultImage(file) {
+  if (!file) return;
+  const input = $('#ai-result-input');
+  try {
+    const importedImage = await compressImage(file, 1536, 0.84);
+    const isFirstVersion = currentAIVersions.length === 0;
+    const instruction = pendingManualFeedback || (isFirstVersion
+      ? 'Primera presentación creada en ChatGPT'
+      : 'Nueva versión importada desde ChatGPT');
+    if (pendingManualFeedback) {
+      currentAIChat.push({ role: 'user', text: pendingManualFeedback, createdAt: Date.now() });
+    } else if (isFirstVersion) {
+      currentAIChat.push({ role: 'user', text: 'Crear una presentación premium con el estilo de Aurea.', createdAt: Date.now() });
+    }
+    currentAIChat.push({
+      role: 'assistant',
+      text: isFirstVersion
+        ? 'Primera versión importada. Puedes pedirme cambios en la misma conversación de ChatGPT.'
+        : 'Nueva versión importada. Puedes seguir corrigiéndola o descargar la publicidad.',
+      createdAt: Date.now()
+    });
+    currentAIChat = currentAIChat.slice(-20);
+    const versionId = uid('aiv');
+    currentImageData = importedImage;
+    currentAIResponseId = '';
+    currentAIVersions.push({
+      id: versionId,
+      parentId: currentAIVersionId || '',
+      imageUrl: importedImage,
+      responseId: '',
+      instruction,
+      chat: currentAIChat.slice(),
+      createdAt: Date.now()
+    });
+    currentAIVersions = currentAIVersions.slice(-6);
+    currentAIVersionId = versionId;
+    pendingManualFeedback = '';
+    $('#ai-feedback-input').value = '';
+    renderDesigner();
+    const autoSaved = saveDesign({ silent: true });
+    toast(`Imagen importada${autoSaved ? ' y diseño guardado' : ''}`);
+  } catch (error) {
+    toast(error.message || 'No fue posible importar la imagen');
+  } finally {
+    if (input) input.value = '';
   }
 }
 
@@ -1315,7 +1422,7 @@ function drawImageCover(context, image, width, height) {
 
 function wrapCanvasText(context, text, x, y, maxWidth, lineHeight, maxLines = 3) {
   const words = String(text || '').split(/\s+/);
-  const lines = [];
+  let lines = [];
   let line = '';
   words.forEach(word => {
     const candidate = line ? `${line} ${word}` : word;
@@ -1327,6 +1434,22 @@ function wrapCanvasText(context, text, x, y, maxWidth, lineHeight, maxLines = 3)
     }
   });
   if (line) lines.push(line);
+  if (lines.length > 1 && words.length >= 4 && words.length <= 10 && maxLines >= 2) {
+    const balanced = [];
+    for (let split = 1; split < words.length; split += 1) {
+      const first = words.slice(0, split).join(' ');
+      const second = words.slice(split).join(' ');
+      const firstWidth = context.measureText(first).width;
+      const secondWidth = context.measureText(second).width;
+      if (firstWidth <= maxWidth && secondWidth <= maxWidth) {
+        balanced.push({ lines: [first, second], score: Math.abs(firstWidth - secondWidth) });
+      }
+    }
+    if (balanced.length) {
+      balanced.sort((a, b) => a.score - b.score);
+      lines = balanced[0].lines;
+    }
+  }
   lines.slice(0, maxLines).forEach((item, index) => context.fillText(item, x, y + (index * lineHeight)));
   return Math.min(lines.length, maxLines);
 }
@@ -1735,8 +1858,6 @@ function renderSettings() {
   $('#set-margin-rec').value = number(S.settings.marginRec);
   $('#set-margin-premium').value = number(S.settings.marginPremium);
   $('#set-round').value = String(number(S.settings.roundTo));
-  $('#set-ai-model').value = S.settings.aiModel || 'gpt-5.6';
-  $('#set-ai-quality').value = S.settings.aiQuality || 'medium';
   $('#set-ai-size').value = S.settings.aiSize || '1024x1536';
   $('#set-ai-theme').value = S.settings.aiTheme || 'champagne';
   $('#set-ai-brand-prompt').value = S.settings.aiBrandPrompt || AUREA_BRAND_PROMPT;
@@ -1764,8 +1885,8 @@ function saveSettings() {
     packaging: number($('#set-packaging').value), labor: number($('#set-labor').value), wastePct: number($('#set-waste').value),
     marginMin: number($('#set-margin-min').value), marginRec: number($('#set-margin-rec').value), marginPremium: number($('#set-margin-premium').value),
     roundTo: number($('#set-round').value),
-    aiModel: $('#set-ai-model').value,
-    aiQuality: $('#set-ai-quality').value,
+    aiModel: S.settings.aiModel || 'gpt-5.6',
+    aiQuality: S.settings.aiQuality || 'medium',
     aiSize: $('#set-ai-size').value,
     aiTheme: $('#set-ai-theme').value,
     aiBrandPrompt: $('#set-ai-brand-prompt').value.trim() || AUREA_BRAND_PROMPT,
@@ -1825,11 +1946,19 @@ function bindEvents() {
   $('#design-image-input').onchange = event => handleDesignImage(event.target.files?.[0]);
   $('#remove-product-image-btn').onclick = removeProductImage;
   $('#remove-image-btn').onclick = removeDesignImage;
+  $$('[data-import-ai-result]').forEach(button => { button.onclick = () => $('#ai-result-input').click(); });
+  $('#ai-result-input').onchange = event => handleAIResultImage(event.target.files?.[0]);
   $('#download-presentation-btn').onclick = downloadAureaPresentation;
   $('#ai-prompt-btn').onclick = showAIPrompt;
-  $('#ai-generate-btn').onclick = generateAIImage;
-  $('#ai-refine-btn').onclick = () => refineAIImage();
-  $$('[data-ai-suggestion]').forEach(button => { button.onclick = () => refineAIImage(button.dataset.aiSuggestion); });
+  $('#ai-generate-btn').onclick = prepareManualAI;
+  $('#ai-refine-btn').onclick = () => prepareManualRefinement();
+  $$('[data-ai-suggestion]').forEach(button => {
+    button.onclick = () => {
+      $('#ai-feedback-input').value = button.dataset.aiSuggestion;
+      $('#ai-feedback-input').focus();
+      toast('Corrección preparada; puedes editarla antes de copiar');
+    };
+  });
 
   $('#sale-search').oninput = renderSales;
   $('#sale-status').onchange = renderSales;
@@ -1867,7 +1996,8 @@ Object.assign(window, {
   openSale, saveSale, cancelSale, deleteSale,
   openCustomer, saveCustomer, toggleCustomer, deleteCustomer,
   openExpense, saveExpense, deleteExpense,
-  copyAIPrompt, generateAIImage, refineAIImage, selectAIVersion,
+  copyAIPrompt, copyAIPromptAndOpenChatGPT, openChatGPT,
+  generateAIImage, refineAIImage, prepareManualAI, prepareManualRefinement, selectAIVersion,
   removeAIStyleReference, downloadAureaPresentation
 });
 

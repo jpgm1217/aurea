@@ -131,7 +131,7 @@
 
             <div class="card ai-studio">
               <div class="inline spread preview-head">
-                <div><b class="serif card-title">Estudio creativo con IA</b><span class="help block">Crea una presentación y conversa con Aurea hasta dejarla lista para el cliente.</span></div>
+                <div><b class="serif card-title">Estudio creativo con ChatGPT</b><span class="help block">Usa tu suscripción de ChatGPT, importa el resultado y sigue corrigiéndolo hasta dejarlo listo.</span></div>
                 <button class="btn btn-outline btn-sm" id="ai-prompt-btn">Ver idea guardada</button>
               </div>
 
@@ -152,8 +152,12 @@
               </div>
 
               <div class="ai-create-bar">
-                <div><b>3. Crear la presentación</b><span class="help block">La escena se genera sin letras; la app coloca la marca y el WhatsApp correctamente.</span></div>
-                <button class="btn btn-primary" id="ai-generate-btn">✨ Crear con IA</button>
+                <div><b>3. Crear la presentación en ChatGPT</b><span class="help block">Aurea prepara el prompt. ChatGPT crea la escena y aquí se colocan la marca y el WhatsApp correctamente.</span></div>
+                <div class="ai-create-actions">
+                  <button class="btn btn-primary" id="ai-generate-btn">✨ Preparar en ChatGPT</button>
+                  <button class="btn btn-soft" type="button" data-import-ai-result>Importar resultado</button>
+                </div>
+                <input type="file" id="ai-result-input" accept="image/*" class="hidden">
               </div>
 
               <div class="aurea-poster-shell hidden" id="design-image-wrap">
@@ -174,6 +178,7 @@
                 </div>
                 <div class="poster-actions">
                   <button class="btn btn-outline btn-sm" id="remove-image-btn">Quitar resultado</button>
+                  <button class="btn btn-outline btn-sm" type="button" data-import-ai-result>Importar nueva versión</button>
                   <button class="btn btn-soft btn-sm" id="download-presentation-btn">Descargar publicidad</button>
                 </div>
               </div>
@@ -184,7 +189,7 @@
               </div>
 
               <div class="ai-chat hidden" id="ai-chat">
-                <div class="inline spread"><div><b>Hablar con la IA</b><span class="help block">Describe solo lo que quieres corregir.</span></div><span class="ai-chat-status">Edición conversacional</span></div>
+                <div class="inline spread"><div><b>Seguir mejorando en ChatGPT</b><span class="help block">Describe el cambio, cópialo y pégalo en la misma conversación de ChatGPT.</span></div><span class="ai-chat-status">Sin API adicional</span></div>
                 <div class="ai-chat-messages" id="ai-chat-messages"></div>
                 <div class="ai-suggestions">
                   <button type="button" data-ai-suggestion="Conserva exactamente la manilla y sus materiales; mejora únicamente la iluminación y el fondo.">Conservar producto</button>
@@ -194,7 +199,7 @@
                 </div>
                 <div class="ai-chat-compose">
                   <textarea class="input" id="ai-feedback-input" rows="2" placeholder="Ej. Conserva la manilla, cambia el fondo a rosa claro y agrega una tela satinada..."></textarea>
-                  <button class="btn btn-primary" id="ai-refine-btn">Mejorar imagen</button>
+                  <button class="btn btn-primary" id="ai-refine-btn">Copiar corrección</button>
                 </div>
               </div>
 
@@ -276,10 +281,8 @@
             <div class="setting-row"><div class="setting-label"><b>Redondear a</b><span>Evita precios con decimales.</span></div><select class="input" id="set-round"><option value="500">$500</option><option value="1000">$1.000</option><option value="5000">$5.000</option></select></div>
           </div>
           <div class="card settings-group">
-            <h3 class="settings-title">Generación de imágenes con IA</h3>
-            <p class="help">La clave de OpenAI se guarda como secreto en Firebase Functions; nunca queda dentro de la PWA. El estudio usa una conversación para mejorar la misma imagen.</p>
-            <div class="setting-row"><div class="setting-label"><b>Motor creativo</b><span>Responses API + GPT Image 2 para edición conversacional.</span></div><select class="input" id="set-ai-model"><option value="gpt-5.6">GPT-5.6 + GPT Image 2</option></select></div>
-            <div class="setting-row"><div class="setting-label"><b>Calidad</b><span>Media es el equilibrio inicial recomendado.</span></div><select class="input" id="set-ai-quality"><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></select></div>
+            <h3 class="settings-title">Imágenes con tu ChatGPT</h3>
+            <p class="help">Este modo no necesita una clave API ni el plan Blaze. Aurea prepara las instrucciones, tú conversas con ChatGPT y luego importas la imagen final o cada nueva versión.</p>
             <div class="setting-row"><div class="setting-label"><b>Formato</b><span>Vertical para publicaciones o cuadrado para catálogo.</span></div><select class="input" id="set-ai-size"><option value="1024x1536">Vertical 1024 × 1536</option><option value="1024x1024">Cuadrado 1024 × 1024</option><option value="1536x1024">Horizontal 1536 × 1024</option></select></div>
             <div class="setting-row"><div class="setting-label"><b>Estilo de la plantilla</b><span>Controla los colores de la marca sobre la foto.</span></div><select class="input" id="set-ai-theme"><option value="champagne">Champaña y dorado</option><option value="rose">Rosa delicado</option><option value="black-gold">Negro y dorado</option></select></div>
             <div class="field"><label>Idea visual guardada</label><textarea class="input" id="set-ai-brand-prompt" rows="6"></textarea><span class="help">Se combina automáticamente con los materiales y las notas de cada diseño.</span></div>
@@ -290,7 +293,7 @@
               <div class="field"><label>Beneficios, separados por |</label><input class="input" id="set-ai-benefits" maxlength="180"></div>
             </div>
             <div class="ai-reference-settings">
-              <div class="inline spread"><div><b>Referencias visuales de Aurea</b><span class="help block">Sube hasta cuatro ejemplos; la IA tomará el estilo, no sus textos.</span></div><button class="btn btn-outline btn-sm" id="add-ai-reference-btn" type="button">Agregar fotos</button></div>
+              <div class="inline spread"><div><b>Referencias visuales de Aurea</b><span class="help block">Guarda hasta cuatro ejemplos y adjunta esas mismas fotos al iniciar la conversación en ChatGPT.</span></div><button class="btn btn-outline btn-sm" id="add-ai-reference-btn" type="button">Agregar fotos</button></div>
               <input type="file" id="ai-reference-input" accept="image/*" multiple class="hidden">
               <div class="ai-reference-grid" id="ai-reference-grid"></div>
             </div>
