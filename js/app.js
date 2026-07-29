@@ -14,6 +14,7 @@ const DATA_PATH = 'aurea/v1/data';
 const PIN_PATH = 'aurea/v1/config/pinHash';
 const LOCAL_KEY = 'aurea_data_v1';
 const PIN_KEY = 'aurea_pin_hash_v1';
+const APP_CHECK_SITE_KEY = '6Ld8oGstAAAAALAszbzyh31d-rv9sq3jITg0sTNX';
 
 const AUREA_BRAND_PROMPT = `Dirección artística de catálogo premium para AUREA, una marca colombiana de manillas artesanales. Inspiración visual: fotografía vertical elegante, cálida y romántica; paleta champaña, crema, rosa empolvado, negro profundo y dorado; telas satinadas, lino fino, fibras naturales y flores secas muy sutiles; iluminación editorial suave con destellos dorados controlados; profundidad de campo delicada; producto protagonista, nítido y realista. La escena debe sentirse artesanal, femenina, amorosa, sofisticada y lista para Instagram o WhatsApp. Conservar exactamente la forma, colores, cantidades, orden y materiales de la manilla de referencia. No añadir ni quitar balines, dijes, hilos o accesorios. No generar letras, logotipos, marcas de agua, números, sellos ni iconos. Dejar espacio visual limpio en la parte superior y en la parte inferior para que Aurea coloque después su identidad, beneficios y WhatsApp sin cubrir el producto.`;
 
@@ -190,6 +191,12 @@ async function initFirebase() {
   let signedInUser = null;
   try {
     if (!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
+    if (firebase.appCheck) {
+      firebase.appCheck().activate(
+        new firebase.appCheck.ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY),
+        true
+      );
+    }
     if (firebase.functions) functionsClient = firebase.app().functions('us-central1');
     if (firebase.auth) {
       const auth = firebase.auth();
