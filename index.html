@@ -75,6 +75,7 @@
             <button class="quick" data-go="management" data-tab="production"><strong>＋ Fabricar manillas</strong><span>Convertir materiales en producto listo</span></button>
             <button class="quick" data-action="new-sale"><strong>＋ Registrar venta</strong><span>Ingreso y utilidad</span></button>
             <button class="quick" data-go="management" data-tab="expenses"><strong>＋ Registrar gasto</strong><span>Control de utilidad neta</span></button>
+            <button class="quick" data-go="prices"><strong>◈ Ver precios al público</strong><span>Consulta rápida para atender clientes</span></button>
           </div>
         </div>
 
@@ -129,6 +130,40 @@
           <select class="input" id="material-status"><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select>
         </div>
         <div id="material-list" class="material-list"></div>
+      </section>
+
+      <section class="view" id="view-prices">
+        <div class="public-price-hero">
+          <div>
+            <span class="guide-label">Consulta rápida</span>
+            <h2>Precios al público</h2>
+            <p>Busca el tipo de balín y dile al cliente el valor por unidad. Esta lista no modifica inventario, costos ni ventas.</p>
+          </div>
+          <a class="btn btn-primary btn-sm" href="assets/catalogo-precios-publico.png" download="aurea-catalogo-precios-publico.png">Descargar afiche</a>
+        </div>
+
+        <div class="guided-tip"><span>◈</span><div><b>¿Cómo usar esta lista?</b><p>Elige una familia, confirma el tamaño y lee el precio. Para una <strong>manilla terminada</strong>, usa el precio calculado en Diseñar; aquí aparecen únicamente balines y neoprenos sueltos.</p></div></div>
+
+        <div class="public-price-toolbar">
+          <input class="input" id="public-price-search" placeholder="Buscar liso, diamantado, 6 mm...">
+          <select class="input" id="public-price-line">
+            <option value="">Todos los materiales</option>
+            <option value="laminated">Oro laminado 18K</option>
+            <option value="neoprene">Neopreno argollado</option>
+            <option value="certified">Oro 18K certificado</option>
+          </select>
+        </div>
+
+        <div class="public-price-summary" id="public-price-summary"></div>
+        <div class="public-price-grid" id="public-price-list"></div>
+
+        <details class="public-poster-card">
+          <summary><span>Ver el afiche completo</span><small>Ábrelo para ampliar o mostrarlo al cliente</small></summary>
+          <a href="assets/catalogo-precios-publico.png" target="_blank" rel="noopener">
+            <img src="assets/catalogo-precios-publico.png" loading="lazy" alt="Catálogo general de precios al público de Aurea">
+          </a>
+          <a class="btn btn-outline btn-block" href="assets/catalogo-precios-publico.png" download="aurea-catalogo-precios-publico.png">Descargar imagen</a>
+        </details>
       </section>
 
       <section class="view" id="view-designer">
@@ -365,6 +400,7 @@
   <nav class="bottom-nav">
     <button class="nav-btn active" data-view="home"><span class="nav-icon">⌂</span><span>Inicio</span></button>
     <button class="nav-btn" data-view="inventory"><span class="nav-icon">◫</span><span>Inventario</span></button>
+    <button class="nav-btn" data-view="prices"><span class="nav-icon">◇</span><span>Precios</span></button>
     <button class="nav-btn" data-view="designer"><span class="nav-icon">✦</span><span>Diseñar</span></button>
     <button class="nav-btn" data-view="sales"><span class="nav-icon">$</span><span>Ventas</span></button>
     <button class="nav-btn" data-view="management"><span class="nav-icon">☰</span><span>Gestión</span></button>

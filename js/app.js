@@ -66,6 +66,57 @@ const DEFAULT_MATERIALS = [
   cost, stock: 0, minStock: 5, active: true, createdAt: Date.now()
 }));
 
+const PUBLIC_PRICE_CATALOG = Object.freeze([
+  {
+    id: 'liso',
+    name: 'Balín liso',
+    material: 'Oro laminado 18K',
+    line: 'laminated',
+    note: 'Un clásico que combina con todo.',
+    prices: [['3 mm', 3000], ['4 mm', 4000], ['5 mm', 7000], ['6 mm', 9000], ['8 mm', 16000]]
+  },
+  {
+    id: 'diamantado',
+    name: 'Balín diamantado',
+    material: 'Oro laminado 18K',
+    line: 'laminated',
+    note: 'Brillo que transforma cada detalle.',
+    prices: [['3 mm', 3500], ['4 mm', 4500], ['5 mm', 8500], ['6 mm', 11500], ['8 mm', 16000]]
+  },
+  {
+    id: 'italiano',
+    name: 'Balín italiano',
+    material: 'Oro laminado 18K',
+    line: 'laminated',
+    note: '6 mm agotado en el proveedor.',
+    prices: [['3 mm', 3500], ['4 mm', 4500], ['5 mm', 8000]]
+  },
+  {
+    id: 'balin-x',
+    name: 'Balín X',
+    material: 'Oro laminado 18K',
+    line: 'laminated',
+    note: 'Una textura diferente para un diseño único.',
+    prices: [['6 mm', 9000], ['8 mm', 13000]]
+  },
+  {
+    id: 'neopreno',
+    name: 'Neopreno argollado',
+    material: 'Detalle en oro laminado 18K',
+    line: 'neoprene',
+    note: 'Consulta los colores disponibles antes de confirmar.',
+    prices: [['6 mm', 5500], ['8 mm', 6500]]
+  },
+  {
+    id: 'certificado',
+    name: 'Balín en oro 18K certificado',
+    material: 'Disponible liso o diamantado al mismo precio',
+    line: 'certified',
+    note: 'Oro auténtico con respaldo del lote del proveedor.',
+    prices: [['3 mm', 24000], ['4 mm', 42000], ['5 mm', 61000], ['6 mm', 96000], ['7 mm', 135000], ['8 mm', 203000]]
+  }
+]);
+
 let S = {
   schemaVersion: SCHEMA_VERSION,
   revision: 0,
@@ -760,6 +811,7 @@ function showView(name, tab = '') {
   if (name === 'management' && tab) showManagementTab(tab);
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (name === 'designer') renderDesigner();
+  if (name === 'prices') renderPublicPrices();
   if (name === 'management') renderManagement();
 }
 
@@ -773,6 +825,7 @@ function renderAll() {
   renderDashboard();
   renderGettingStarted();
   renderInventory();
+  renderPublicPrices();
   renderDesigner();
   renderSales();
   renderManagement();
@@ -985,6 +1038,49 @@ function renderInventory() {
     </article>`;
   }).join('') : '<div class="card empty"><b>No hay resultados</b>Cambia el filtro o registra un material.</div>';
   renderMaterialSelects();
+}
+
+function renderPublicPrices() {
+  const list = $('#public-price-list');
+  const summary = $('#public-price-summary');
+  if (!list || !summary) return;
+  const query = ($('#public-price-search')?.value || '').trim().toLowerCase();
+  const line = $('#public-price-line')?.value || '';
+  const catalog = PUBLIC_PRICE_CATALOG.filter(family => {
+    if (line && family.line !== line) return false;
+    if (!query) return true;
+    const searchable = [
+      family.name,
+      family.material,
+      family.note,
+      ...family.prices.flatMap(([size, price]) => [size, price])
+    ].join(' ').toLowerCase();
+    return searchable.includes(query);
+  });
+  const priceCount = catalog.reduce((total, family) => total + family.prices.length, 0);
+  summary.textContent = catalog.length
+    ? `${catalog.length} ${catalog.length === 1 ? 'familia' : 'familias'} · ${priceCount} precios por unidad`
+    : 'No encontramos precios con ese filtro';
+  list.innerHTML = catalog.length ? catalog.map(family => `
+    <article class="public-price-card ${esc(family.line)}">
+      <div class="public-price-card-head">
+        <span class="public-price-bead ${esc(family.id)}" aria-hidden="true"></span>
+        <div>
+          <h3>${esc(family.name)}</h3>
+          <p>${esc(family.material)}</p>
+        </div>
+      </div>
+      <div class="public-price-rows">
+        ${family.prices.map(([size, price]) => `
+          <div class="public-price-row">
+            <span>${esc(size)}</span>
+            <b>${money(price)}</b>
+          </div>
+        `).join('')}
+      </div>
+      <p class="public-price-note">${esc(family.note)}</p>
+    </article>
+  `).join('') : '<div class="empty public-price-empty"><b>Sin resultados</b>Prueba con otro nombre o tamaño.</div>';
 }
 
 function renderMaterialSelects() {
@@ -2720,6 +2816,8 @@ function bindEvents() {
   $('#material-search').oninput = renderInventory;
   $('#material-category').onchange = renderInventory;
   $('#material-status').onchange = renderInventory;
+  $('#public-price-search').oninput = renderPublicPrices;
+  $('#public-price-line').onchange = renderPublicPrices;
   $('#add-material-btn').onclick = () => openMaterial();
   $('#new-purchase-btn').onclick = () => openPurchase();
 
@@ -2809,6 +2907,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderAll();
   const requestedView = new URLSearchParams(location.search).get('view');
   const requestedTab = new URLSearchParams(location.search).get('tab') || '';
-  if (['home', 'inventory', 'designer', 'sales', 'management'].includes(requestedView)) showView(requestedView, requestedTab);
+  if (['home', 'inventory', 'prices', 'designer', 'sales', 'management'].includes(requestedView)) showView(requestedView, requestedTab);
   if (location.protocol !== 'file:' && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(console.warn);
 });
