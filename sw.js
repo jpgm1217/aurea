@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'aurea-pwa-';
-const CACHE = `${CACHE_PREFIX}v13-public-price-catalog`;
+const CACHE = `${CACHE_PREFIX}v15-afiche-generado`;
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,7 +8,6 @@ const APP_SHELL = [
   './js/domain.js',
   './js/app.js',
   './assets/logo-aurea.jpg',
-  './assets/catalogo-precios-publico.png',
   './assets/icon-192.png',
   './assets/icon-512.png'
 ];

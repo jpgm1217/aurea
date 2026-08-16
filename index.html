@@ -139,30 +139,56 @@
             <h2>Precios al público</h2>
             <p>Busca el tipo de balín y dile al cliente el valor por unidad. Esta lista no modifica inventario, costos ni ventas.</p>
           </div>
-          <a class="btn btn-primary btn-sm" href="assets/catalogo-precios-publico.png" download="aurea-catalogo-precios-publico.png">Descargar afiche</a>
+          <button class="btn btn-primary btn-sm" id="download-catalog-poster-btn" type="button">Descargar afiche</button>
         </div>
 
-        <div class="guided-tip"><span>◈</span><div><b>¿Cómo usar esta lista?</b><p>Elige una familia, confirma el tamaño y lee el precio. Para una <strong>manilla terminada</strong>, usa el precio calculado en Diseñar; aquí aparecen únicamente balines y neoprenos sueltos.</p></div></div>
+        <div class="guided-tip"><span>◈</span><div><b>¿Cómo usar esta lista?</b><p>Arriba tienes el <strong>precio por balín suelto</strong> y abajo el <strong>precio de la manilla ya armada</strong> según cuántos lleve. Toca <strong>Editar</strong> en cualquier tarjeta para cambiar un precio: se guarda en la nube y no modifica inventario, costos ni ventas.</p></div></div>
 
         <div class="public-price-toolbar">
           <input class="input" id="public-price-search" placeholder="Buscar liso, diamantado, 6 mm...">
           <select class="input" id="public-price-line">
             <option value="">Todos los materiales</option>
+            <option value="certified">Oro 18K</option>
             <option value="laminated">Oro laminado 18K</option>
             <option value="neoprene">Neopreno argollado</option>
-            <option value="certified">Oro 18K certificado</option>
           </select>
         </div>
 
         <div class="public-price-summary" id="public-price-summary"></div>
         <div class="public-price-grid" id="public-price-list"></div>
 
-        <details class="public-poster-card">
-          <summary><span>Ver el afiche completo</span><small>Ábrelo para ampliar o mostrarlo al cliente</small></summary>
-          <a href="assets/catalogo-precios-publico.png" target="_blank" rel="noopener">
-            <img src="assets/catalogo-precios-publico.png" loading="lazy" alt="Catálogo general de precios al público de Aurea">
-          </a>
-          <a class="btn btn-outline btn-block" href="assets/catalogo-precios-publico.png" download="aurea-catalogo-precios-publico.png">Descargar imagen</a>
+        <div class="price-admin-bar">
+          <button class="btn btn-soft btn-sm" id="add-price-family-btn" type="button">＋ Nueva familia</button>
+          <button class="btn btn-outline btn-sm" id="price-settings-btn" type="button">⚙ Mano de obra y cantidades</button>
+          <button class="btn btn-outline btn-sm" id="reset-prices-btn" type="button">↺ Restaurar precios de fábrica</button>
+        </div>
+
+        <section class="bracelet-price-card">
+          <div class="bracelet-price-head">
+            <div>
+              <span class="guide-label">Manilla completa</span>
+              <h3>¿Cuánto vale la manilla armada?</h3>
+              <p>Elige el balín y lee el precio final según cuántos lleve. Ya incluye la mano de obra.</p>
+            </div>
+            <select class="input" id="bracelet-price-family" aria-label="Familia de balines para la tabla"></select>
+          </div>
+          <div class="bracelet-price-scroll">
+            <table class="bracelet-price-table" id="bracelet-price-table"></table>
+          </div>
+          <p class="bracelet-price-formula" id="bracelet-price-formula"></p>
+        </section>
+
+        <details class="public-poster-card" id="price-poster-card">
+          <summary><span>Ver el afiche para el cliente</span><small>Ábrelo para revisarlo o mandarlo por WhatsApp</small></summary>
+          <div class="poster-tabs">
+            <button class="tab poster-tab active" type="button" data-poster="prices">Precio por balín</button>
+            <button class="tab poster-tab" type="button" data-poster="bracelet">Precio de la manilla</button>
+          </div>
+          <div class="price-poster-stage">
+            <canvas id="price-poster-canvas" aria-label="Afiche de precios al público de Aurea"></canvas>
+          </div>
+          <p class="help" id="price-poster-status">Se arma solo con los precios de arriba.</p>
+          <button class="btn btn-primary btn-block" id="download-price-poster-btn" type="button">Descargar afiche</button>
         </details>
       </section>
 

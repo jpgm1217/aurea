@@ -66,13 +66,46 @@ const DEFAULT_MATERIALS = [
   cost, stock: 0, minStock: 5, active: true, createdAt: Date.now()
 }));
 
-const PUBLIC_PRICE_CATALOG = Object.freeze([
+const PRICE_LINES = Object.freeze([
+  { value: 'certified', label: 'Oro 18K' },
+  { value: 'laminated', label: 'Oro laminado 18K' },
+  { value: 'neoprene', label: 'Neopreno argollado' }
+]);
+const PRICE_BEADS = Object.freeze(['certificado', 'liso', 'diamantado', 'italiano', 'balin-x', 'neopreno']);
+const DEFAULT_PRICE_QUANTITIES = Object.freeze([3, 5, 7, 10, 12, 15, 18, 20]);
+const DEFAULT_PRICE_LABOR = 15000;
+
+// Precios al público. Los de oro 18K vienen de "Precios_Manillas_Oro18K.xlsx"
+// (costo promedio + 30% de margen). Son editables desde la pestaña Precios.
+const DEFAULT_PRICE_FAMILIES = Object.freeze([
+  {
+    id: 'certificado',
+    name: 'Balín en oro 18K',
+    material: 'Disponible liso o diamantado al mismo precio',
+    line: 'certified',
+    bead: 'certificado',
+    note: 'Oro auténtico con respaldo del lote del proveedor.',
+    braceletTable: true,
+    prices: [['3 mm', 18000], ['4 mm', 32000], ['5 mm', 46000], ['6 mm', 72000], ['7 mm', 100000], ['8 mm', 142000]]
+  },
+  {
+    id: 'neopreno-oro',
+    name: 'Neopreno para oro 18K',
+    material: 'Separador que se combina con balines de oro',
+    line: 'certified',
+    bead: 'neopreno',
+    note: 'Se cobra por unidad dentro de la manilla.',
+    braceletTable: false,
+    prices: [['Unidad', 4000]]
+  },
   {
     id: 'liso',
     name: 'Balín liso',
     material: 'Oro laminado 18K',
     line: 'laminated',
+    bead: 'liso',
     note: 'Un clásico que combina con todo.',
+    braceletTable: true,
     prices: [['3 mm', 3000], ['4 mm', 4000], ['5 mm', 7000], ['6 mm', 9000], ['8 mm', 16000]]
   },
   {
@@ -80,7 +113,9 @@ const PUBLIC_PRICE_CATALOG = Object.freeze([
     name: 'Balín diamantado',
     material: 'Oro laminado 18K',
     line: 'laminated',
+    bead: 'diamantado',
     note: 'Brillo que transforma cada detalle.',
+    braceletTable: true,
     prices: [['3 mm', 3500], ['4 mm', 4500], ['5 mm', 8500], ['6 mm', 11500], ['8 mm', 16000]]
   },
   {
@@ -88,7 +123,9 @@ const PUBLIC_PRICE_CATALOG = Object.freeze([
     name: 'Balín italiano',
     material: 'Oro laminado 18K',
     line: 'laminated',
+    bead: 'italiano',
     note: '6 mm agotado en el proveedor.',
+    braceletTable: true,
     prices: [['3 mm', 3500], ['4 mm', 4500], ['5 mm', 8000]]
   },
   {
@@ -96,7 +133,9 @@ const PUBLIC_PRICE_CATALOG = Object.freeze([
     name: 'Balín X',
     material: 'Oro laminado 18K',
     line: 'laminated',
+    bead: 'balin-x',
     note: 'Una textura diferente para un diseño único.',
+    braceletTable: true,
     prices: [['6 mm', 9000], ['8 mm', 13000]]
   },
   {
@@ -104,24 +143,25 @@ const PUBLIC_PRICE_CATALOG = Object.freeze([
     name: 'Neopreno argollado',
     material: 'Detalle en oro laminado 18K',
     line: 'neoprene',
+    bead: 'neopreno',
     note: 'Consulta los colores disponibles antes de confirmar.',
+    braceletTable: false,
     prices: [['6 mm', 5500], ['8 mm', 6500]]
-  },
-  {
-    id: 'certificado',
-    name: 'Balín en oro 18K certificado',
-    material: 'Disponible liso o diamantado al mismo precio',
-    line: 'certified',
-    note: 'Oro auténtico con respaldo del lote del proveedor.',
-    prices: [['3 mm', 24000], ['4 mm', 42000], ['5 mm', 61000], ['6 mm', 96000], ['7 mm', 135000], ['8 mm', 203000]]
   }
 ]);
+
+const defaultPriceCatalog = () => ({
+  labor: DEFAULT_PRICE_LABOR,
+  quantities: [...DEFAULT_PRICE_QUANTITIES],
+  families: DEFAULT_PRICE_FAMILIES.map(family => ({ ...family, prices: family.prices.map(row => [...row]) }))
+});
 
 let S = {
   schemaVersion: SCHEMA_VERSION,
   revision: 0,
   appliedOperations: [],
   settings: { ...DEFAULT_SETTINGS },
+  priceCatalog: defaultPriceCatalog(),
   materials: DEFAULT_MATERIALS,
   designs: [],
   productions: [],
@@ -156,6 +196,8 @@ let editingSaleId = null;
 let editingCustomerId = null;
 let editingExpenseId = null;
 let editingPurchaseId = null;
+let editingPriceFamilyId = null;
+let priceFamilyDraft = null;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -235,6 +277,52 @@ function setSync(mode, text) {
   $('#sync-text').textContent = text;
 }
 
+function normalizePriceCatalog(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const fallback = defaultPriceCatalog();
+  const familiesSource = Array.isArray(source.families) && source.families.length ? source.families : fallback.families;
+  const usedIds = new Set();
+  const families = familiesSource
+    .filter(item => item && typeof item === 'object' && (item.id || item.name))
+    .map((item, index) => {
+      let id = cleanCode(item.id || item.name).toLowerCase() || `familia-${index + 1}`;
+      while (usedIds.has(id)) id = `${id.slice(0, 25)}-${index + 1}`;
+      usedIds.add(id);
+      const seenSizes = new Set();
+      const prices = (Array.isArray(item.prices) ? item.prices : [])
+        .map(row => (Array.isArray(row) ? row : [row?.size, row?.price]))
+        .map(([size, price]) => [String(size ?? '').trim().slice(0, 24), Math.max(0, Math.round(number(price)))])
+        .filter(([size]) => {
+          if (!size || seenSizes.has(size.toLowerCase())) return false;
+          seenSizes.add(size.toLowerCase());
+          return true;
+        })
+        .slice(0, 14);
+      return {
+        id,
+        name: String(item.name || 'Sin nombre').trim().slice(0, 60) || 'Sin nombre',
+        material: String(item.material || '').trim().slice(0, 90),
+        line: PRICE_LINES.some(option => option.value === item.line) ? item.line : 'laminated',
+        bead: PRICE_BEADS.includes(item.bead) ? item.bead : 'liso',
+        note: String(item.note || '').trim().slice(0, 180),
+        braceletTable: item.braceletTable !== false,
+        prices
+      };
+    })
+    .filter(family => family.prices.length)
+    .slice(0, 20);
+  const quantities = [...new Set((Array.isArray(source.quantities) && source.quantities.length ? source.quantities : fallback.quantities)
+    .map(value => Math.floor(number(value)))
+    .filter(value => value >= 1 && value <= 200))]
+    .sort((a, b) => a - b)
+    .slice(0, 10);
+  return {
+    labor: Math.max(0, Math.round(number(source.labor ?? fallback.labor))),
+    quantities: quantities.length ? quantities : [...fallback.quantities],
+    families: families.length ? families : fallback.families
+  };
+}
+
 function normalizeState(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const settings = { ...DEFAULT_SETTINGS, ...(source.settings || {}) };
@@ -299,6 +387,7 @@ function normalizeState(raw) {
     revision: Math.max(0, Math.floor(number(source.revision))),
     appliedOperations: Array.isArray(source.appliedOperations) ? source.appliedOperations.slice(-200) : [],
     settings,
+    priceCatalog: normalizePriceCatalog(source.priceCatalog),
     materials,
     designs,
     productions,
@@ -1040,13 +1129,17 @@ function renderInventory() {
   renderMaterialSelects();
 }
 
+const priceFamilies = () => (S.priceCatalog?.families || []);
+const getPriceFamily = id => priceFamilies().find(family => family.id === id) || null;
+const priceLineLabel = value => PRICE_LINES.find(option => option.value === value)?.label || 'Otros';
+
 function renderPublicPrices() {
   const list = $('#public-price-list');
   const summary = $('#public-price-summary');
   if (!list || !summary) return;
   const query = ($('#public-price-search')?.value || '').trim().toLowerCase();
   const line = $('#public-price-line')?.value || '';
-  const catalog = PUBLIC_PRICE_CATALOG.filter(family => {
+  const catalog = priceFamilies().filter(family => {
     if (line && family.line !== line) return false;
     if (!query) return true;
     const searchable = [
@@ -1064,11 +1157,12 @@ function renderPublicPrices() {
   list.innerHTML = catalog.length ? catalog.map(family => `
     <article class="public-price-card ${esc(family.line)}">
       <div class="public-price-card-head">
-        <span class="public-price-bead ${esc(family.id)}" aria-hidden="true"></span>
+        <span class="public-price-bead ${esc(family.bead)}" aria-hidden="true"></span>
         <div>
           <h3>${esc(family.name)}</h3>
           <p>${esc(family.material)}</p>
         </div>
+        <button type="button" class="public-price-edit" onclick="openPriceFamily('${esc(family.id)}')">Editar</button>
       </div>
       <div class="public-price-rows">
         ${family.prices.map(([size, price]) => `
@@ -1081,6 +1175,206 @@ function renderPublicPrices() {
       <p class="public-price-note">${esc(family.note)}</p>
     </article>
   `).join('') : '<div class="empty public-price-empty"><b>Sin resultados</b>Prueba con otro nombre o tamaño.</div>';
+  renderBraceletPrices();
+  renderPricePoster();
+}
+
+function renderBraceletPrices() {
+  const select = $('#bracelet-price-family');
+  const table = $('#bracelet-price-table');
+  const foot = $('#bracelet-price-formula');
+  if (!select || !table || !foot) return;
+  const catalog = S.priceCatalog;
+  const families = priceFamilies().filter(family => family.braceletTable && family.prices.length);
+  if (!families.length) {
+    select.innerHTML = '<option value="">Sin familias</option>';
+    table.innerHTML = '';
+    foot.textContent = 'Marca "Mostrar en la tabla de manilla completa" al editar una familia para verla aquí.';
+    return;
+  }
+  const current = families.some(family => family.id === select.value) ? select.value : families[0].id;
+  select.innerHTML = families.map(family =>
+    `<option value="${esc(family.id)}" ${family.id === current ? 'selected' : ''}>${esc(family.name)}</option>`).join('');
+  const family = families.find(item => item.id === current);
+  const quantities = catalog.quantities;
+  const labor = number(catalog.labor);
+  table.innerHTML = `
+    <thead><tr><th scope="col">Balín</th>${quantities.map(qty => `<th scope="col">${qty}</th>`).join('')}</tr></thead>
+    <tbody>${family.prices.map(([size, price]) => `
+      <tr>
+        <th scope="row">${esc(size)}</th>
+        ${quantities.map(qty => `<td>${money(number(price) * qty + labor)}</td>`).join('')}
+      </tr>
+    `).join('')}</tbody>`;
+  const neoprene = number(getPriceFamily('neopreno-oro')?.prices?.[0]?.[1]);
+  foot.innerHTML = `Fórmula: <b>(nº de balines × precio unitario) + ${money(labor)} de mano de obra</b>.`
+    + (neoprene > 0 ? ` Si la manilla lleva neoprenos, suma ${money(neoprene)} por cada uno.` : '');
+}
+
+function openPriceFamily(id = '') {
+  const existing = id ? getPriceFamily(id) : null;
+  editingPriceFamilyId = existing ? existing.id : null;
+  priceFamilyDraft = existing
+    ? { ...existing, prices: existing.prices.map(row => [...row]) }
+    : { id: '', name: '', material: '', line: 'certified', bead: 'liso', note: '', braceletTable: true, prices: [['', 0]] };
+  renderPriceFamilyModal();
+}
+
+function readPriceFamilyDraft() {
+  if (!priceFamilyDraft || !$('#pf-name')) return;
+  priceFamilyDraft.name = $('#pf-name').value;
+  priceFamilyDraft.material = $('#pf-material').value;
+  priceFamilyDraft.note = $('#pf-note').value;
+  priceFamilyDraft.line = $('#pf-line').value;
+  priceFamilyDraft.bead = $('#pf-bead').value;
+  priceFamilyDraft.braceletTable = $('#pf-table').checked;
+  priceFamilyDraft.prices = $$('#pf-rows .pf-row').map(row => [
+    row.querySelector('.pf-size').value,
+    number(row.querySelector('.pf-price').value)
+  ]);
+}
+
+function renderPriceFamilyModal() {
+  const draft = priceFamilyDraft;
+  if (!draft) return;
+  openModal(`<div class="modal-head"><h3>${editingPriceFamilyId ? 'Editar' : 'Nueva'} familia de precios</h3><button class="modal-close" onclick="closePriceFamily()">×</button></div>
+    <div class="form-grid two">
+      <div class="field"><label>Nombre</label><input class="input" id="pf-name" maxlength="60" value="${esc(draft.name)}" placeholder="Ej. Balín en oro 18K"></div>
+      <div class="field"><label>Descripción corta</label><input class="input" id="pf-material" maxlength="90" value="${esc(draft.material)}" placeholder="Ej. Oro laminado 18K"></div>
+      <div class="field"><label>Línea</label><select class="input" id="pf-line">${PRICE_LINES.map(option => `<option value="${option.value}" ${draft.line === option.value ? 'selected' : ''}>${esc(option.label)}</option>`).join('')}</select></div>
+      <div class="field"><label>Apariencia del balín</label><select class="input" id="pf-bead">${PRICE_BEADS.map(bead => `<option value="${bead}" ${draft.bead === bead ? 'selected' : ''}>${bead === 'balin-x' ? 'Balín X' : bead[0].toUpperCase() + bead.slice(1)}</option>`).join('')}</select></div>
+      <div class="field full"><label>Nota para el cliente</label><input class="input" id="pf-note" maxlength="180" value="${esc(draft.note)}" placeholder="Ej. 6 mm agotado en el proveedor."></div>
+    </div>
+
+    <div class="pf-rows-head">
+      <label>Precio por unidad</label>
+      <button type="button" class="btn btn-soft btn-xs" onclick="addPriceRow()">＋ Agregar tamaño</button>
+    </div>
+    <div class="pf-rows" id="pf-rows">
+      ${draft.prices.map(([size, price], index) => `
+        <div class="pf-row">
+          <input class="input pf-size" maxlength="24" value="${esc(size)}" placeholder="Ej. 6 mm" aria-label="Tamaño ${index + 1}">
+          <input class="input pf-price" type="number" min="0" step="500" value="${number(price)}" aria-label="Precio ${index + 1}">
+          <button type="button" class="remove" onclick="removePriceRow(${index})" aria-label="Quitar tamaño ${index + 1}">×</button>
+        </div>
+      `).join('')}
+    </div>
+
+    <label class="pf-check"><input type="checkbox" id="pf-table" ${draft.braceletTable ? 'checked' : ''}> Mostrar en la tabla de manilla completa</label>
+
+    <div class="modal-actions">
+      ${editingPriceFamilyId ? `<button class="btn btn-danger" onclick="deletePriceFamily()">Eliminar</button>` : ''}
+      <button class="btn btn-outline" onclick="closePriceFamily()">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePriceFamily()">Guardar</button>
+    </div>`);
+}
+
+function closePriceFamily() {
+  editingPriceFamilyId = null;
+  priceFamilyDraft = null;
+  closeModal();
+}
+
+function addPriceRow() {
+  readPriceFamilyDraft();
+  if (priceFamilyDraft.prices.length >= 14) { toast('Máximo 14 tamaños por familia'); return; }
+  priceFamilyDraft.prices.push(['', 0]);
+  renderPriceFamilyModal();
+}
+
+function removePriceRow(index) {
+  readPriceFamilyDraft();
+  if (priceFamilyDraft.prices.length <= 1) { toast('Deja al menos un tamaño con precio'); return; }
+  priceFamilyDraft.prices.splice(index, 1);
+  renderPriceFamilyModal();
+}
+
+function savePriceFamily() {
+  readPriceFamilyDraft();
+  const draft = priceFamilyDraft;
+  if (!draft) return;
+  const name = String(draft.name || '').trim();
+  if (!name) { toast('Ponle un nombre a la familia'); return; }
+  const rows = draft.prices
+    .map(([size, price]) => [String(size || '').trim(), Math.max(0, Math.round(number(price)))])
+    .filter(([size]) => size);
+  if (!rows.length) { toast('Escribe al menos un tamaño con su precio'); return; }
+  if (new Set(rows.map(([size]) => size.toLowerCase())).size !== rows.length) { toast('Hay tamaños repetidos'); return; }
+
+  const families = priceFamilies().map(family => ({ ...family, prices: family.prices.map(row => [...row]) }));
+  const index = families.findIndex(family => family.id === editingPriceFamilyId);
+  const next = {
+    id: editingPriceFamilyId || cleanCode(`${name}-${shortId(uid('fam'))}`).toLowerCase(),
+    name,
+    material: String(draft.material || '').trim(),
+    line: draft.line,
+    bead: draft.bead,
+    note: String(draft.note || '').trim(),
+    braceletTable: draft.braceletTable !== false,
+    prices: rows
+  };
+  if (index >= 0) families[index] = next; else families.push(next);
+  S.priceCatalog = normalizePriceCatalog({ ...S.priceCatalog, families });
+  persist();
+  closePriceFamily();
+  renderPublicPrices();
+  toast('Precios guardados');
+}
+
+function deletePriceFamily() {
+  if (!editingPriceFamilyId) return;
+  const families = priceFamilies().filter(family => family.id !== editingPriceFamilyId);
+  if (!families.length) { toast('Debe quedar al menos una familia de precios'); return; }
+  if (!confirm('¿Quitar esta familia de la lista de precios? No afecta inventario, costos ni ventas.')) return;
+  S.priceCatalog = normalizePriceCatalog({ ...S.priceCatalog, families });
+  persist();
+  closePriceFamily();
+  renderPublicPrices();
+  toast('Familia eliminada');
+}
+
+function openPriceSettings() {
+  const catalog = S.priceCatalog;
+  openModal(`<div class="modal-head"><h3>Mano de obra y cantidades</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="form-grid">
+      <div class="field">
+        <label>Mano de obra por manilla</label>
+        <input class="input" id="pc-labor" type="number" min="0" step="500" value="${number(catalog.labor)}">
+        <span class="help">Se suma una sola vez al precio de la manilla completa. No cambia el costeo de Diseñar.</span>
+      </div>
+      <div class="field">
+        <label>Cantidades de la tabla</label>
+        <input class="input" id="pc-quantities" value="${esc(catalog.quantities.join(', '))}" placeholder="3, 5, 7, 10, 12, 15, 18, 20">
+        <span class="help">Cuántos balines mostrar como columnas. Máximo 10 cantidades.</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePriceSettings()">Guardar</button>
+    </div>`);
+}
+
+function savePriceSettings() {
+  const labor = number($('#pc-labor').value);
+  const quantities = String($('#pc-quantities').value || '')
+    .split(/[^\d]+/)
+    .map(value => Math.floor(number(value)))
+    .filter(value => value >= 1 && value <= 200);
+  if (labor < 0) { toast('La mano de obra no puede ser negativa'); return; }
+  if (!quantities.length) { toast('Escribe al menos una cantidad, por ejemplo 3, 5, 10'); return; }
+  S.priceCatalog = normalizePriceCatalog({ ...S.priceCatalog, labor, quantities });
+  persist();
+  closeModal();
+  renderPublicPrices();
+  toast('Tabla actualizada');
+}
+
+function resetPriceCatalog() {
+  if (!confirm('¿Restaurar la lista de precios a los valores de fábrica? Se perderán los precios que hayas escrito.')) return;
+  S.priceCatalog = defaultPriceCatalog();
+  persist();
+  renderPublicPrices();
+  toast('Precios de fábrica restaurados');
 }
 
 function renderMaterialSelects() {
@@ -2110,6 +2404,442 @@ async function downloadAureaPresentation() {
   }
 }
 
+/* ---------- Afiches de precios (se arman solos con S.priceCatalog) ---------- */
+
+const POSTER_GOLD = '#e9c67d';
+const POSTER_GOLD_DEEP = '#a9761f';
+const POSTER_CREAM = '#fff4e2';
+const POSTER_MUTED = '#c0a888';
+const posterFont = (size, weight = '') => `${weight ? `${weight} ` : ''}${Math.round(size)}px Georgia, "Times New Roman", serif`;
+const posterSans = (size, weight = '') => `${weight ? `${weight} ` : ''}${Math.round(size)}px Arial, Helvetica, sans-serif`;
+const posterMoney = value => `$${new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(number(value)))}`;
+
+function posterBackground(context, width, height) {
+  const base = context.createLinearGradient(0, 0, width * 0.55, height);
+  base.addColorStop(0, '#0c0806');
+  base.addColorStop(0.5, '#1b1109');
+  base.addColorStop(1, '#0a0705');
+  context.fillStyle = base;
+  context.fillRect(0, 0, width, height);
+  const glow = context.createRadialGradient(width / 2, 0, 0, width / 2, 0, height * 0.42);
+  glow.addColorStop(0, 'rgba(201,154,69,.2)');
+  glow.addColorStop(1, 'rgba(201,154,69,0)');
+  context.fillStyle = glow;
+  context.fillRect(0, 0, width, height * 0.5);
+  context.strokeStyle = 'rgba(233,198,125,.32)';
+  context.lineWidth = 2;
+  context.strokeRect(22, 22, width - 44, height - 44);
+}
+
+function drawPosterBead(context, cx, cy, radius, bead) {
+  const gradient = context.createRadialGradient(cx - radius * 0.34, cy - radius * 0.4, radius * 0.08, cx, cy, radius);
+  if (bead === 'neopreno') {
+    gradient.addColorStop(0, '#5a5a5a');
+    gradient.addColorStop(0.58, '#141414');
+    gradient.addColorStop(1, '#020202');
+  } else {
+    gradient.addColorStop(0, '#fff0a8');
+    gradient.addColorStop(0.31, '#dda63c');
+    gradient.addColorStop(0.73, '#8a530b');
+    gradient.addColorStop(1, '#3b1f05');
+  }
+  context.save();
+  context.beginPath();
+  context.arc(cx, cy, radius, 0, Math.PI * 2);
+  context.fillStyle = gradient;
+  context.fill();
+  context.save();
+  context.clip();
+  context.lineWidth = Math.max(1, radius * 0.1);
+  context.strokeStyle = 'rgba(255,241,196,.5)';
+  if (bead === 'diamantado') {
+    for (let step = -3; step <= 3; step += 1) {
+      context.beginPath();
+      context.moveTo(cx - radius, cy + step * radius * 0.36 + radius * 0.3);
+      context.lineTo(cx + radius, cy + step * radius * 0.36 - radius * 0.3);
+      context.stroke();
+    }
+  } else if (bead === 'italiano') {
+    for (let step = -3; step <= 3; step += 1) {
+      context.beginPath();
+      context.moveTo(cx + step * radius * 0.42 - radius * 0.6, cy - radius);
+      context.lineTo(cx + step * radius * 0.42 + radius * 0.6, cy + radius);
+      context.stroke();
+    }
+  } else if (bead === 'balin-x') {
+    context.lineWidth = Math.max(1.5, radius * 0.14);
+    [[-1, -1, 1, 1], [-1, 1, 1, -1]].forEach(([x1, y1, x2, y2]) => {
+      context.beginPath();
+      context.moveTo(cx + x1 * radius * 0.72, cy + y1 * radius * 0.72);
+      context.lineTo(cx + x2 * radius * 0.72, cy + y2 * radius * 0.72);
+      context.stroke();
+    });
+  }
+  context.restore();
+  // agujero superior
+  context.beginPath();
+  context.ellipse(cx, cy - radius * 0.78, radius * 0.28, radius * 0.14, 0, 0, Math.PI * 2);
+  context.fillStyle = bead === 'neopreno' ? '#0a0a0a' : '#3a2009';
+  context.fill();
+  context.strokeStyle = bead === 'neopreno' ? 'rgba(184,134,46,.8)' : 'rgba(240,205,119,.55)';
+  context.lineWidth = Math.max(1, radius * 0.07);
+  context.beginPath();
+  context.arc(cx, cy, radius, 0, Math.PI * 2);
+  context.stroke();
+  context.restore();
+}
+
+function drawPosterHexBadge(context, cx, cy, size, label) {
+  context.save();
+  context.beginPath();
+  for (let corner = 0; corner < 6; corner += 1) {
+    const angle = (Math.PI / 3) * corner - Math.PI / 2;
+    const x = cx + Math.cos(angle) * size;
+    const y = cy + Math.sin(angle) * size;
+    if (corner === 0) context.moveTo(x, y); else context.lineTo(x, y);
+  }
+  context.closePath();
+  context.strokeStyle = 'rgba(233,198,125,.6)';
+  context.lineWidth = 2;
+  context.stroke();
+  context.fillStyle = POSTER_GOLD;
+  context.font = posterSans(size * 1.05, '700');
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(String(label), cx, cy + 1);
+  context.textBaseline = 'alphabetic';
+  context.textAlign = 'left';
+  context.restore();
+}
+
+function drawPosterHeader(context, width, logo, title, subtitle) {
+  const logoSize = Math.round(width * 0.2);
+  const logoX = (width - logoSize) / 2;
+  const logoY = 44;
+  context.save();
+  context.beginPath();
+  context.arc(width / 2, logoY + logoSize / 2, logoSize / 2, 0, Math.PI * 2);
+  context.clip();
+  context.drawImage(logo, logoX, logoY, logoSize, logoSize);
+  context.restore();
+  context.strokeStyle = 'rgba(233,198,125,.55)';
+  context.lineWidth = 2;
+  context.beginPath();
+  context.arc(width / 2, logoY + logoSize / 2, logoSize / 2, 0, Math.PI * 2);
+  context.stroke();
+
+  context.textAlign = 'center';
+  let y = logoY + logoSize + Math.round(width * 0.075);
+  context.fillStyle = POSTER_GOLD;
+  context.font = posterFont(width * 0.062);
+  context.fillText(title, width / 2, y);
+
+  y += Math.round(width * 0.042);
+  context.fillStyle = POSTER_MUTED;
+  context.font = posterSans(width * 0.021, '700');
+  const label = subtitle.toUpperCase();
+  const labelWidth = context.measureText(label).width;
+  context.fillText(label, width / 2, y);
+  context.strokeStyle = 'rgba(233,198,125,.4)';
+  context.lineWidth = 1.5;
+  [[60, width / 2 - labelWidth / 2 - 26], [width / 2 + labelWidth / 2 + 26, width - 60]].forEach(([from, to]) => {
+    context.beginPath();
+    context.moveTo(from, y - 7);
+    context.lineTo(to, y - 7);
+    context.stroke();
+  });
+  context.textAlign = 'left';
+  return y + Math.round(width * 0.038);
+}
+
+function drawPosterFooter(context, width, y, height, note) {
+  const phone = S.settings.aiWhatsapp || DEFAULT_SETTINGS.aiWhatsapp;
+  context.textAlign = 'center';
+  context.fillStyle = POSTER_GOLD;
+  context.font = posterFont(width * 0.038);
+  context.fillText('Personaliza tu manilla', width / 2, y + 46);
+
+  context.font = posterSans(width * 0.032, '700');
+  const phoneText = `WhatsApp ${phone}`;
+  const pillWidth = Math.min(width - 140, context.measureText(phoneText).width + width * 0.12);
+  const pillHeight = Math.round(width * 0.062);
+  const pillX = (width - pillWidth) / 2;
+  const pillY = y + 74;
+  const pill = context.createLinearGradient(pillX, pillY, pillX + pillWidth, pillY + pillHeight);
+  pill.addColorStop(0, POSTER_GOLD_DEEP);
+  pill.addColorStop(1, POSTER_GOLD);
+  context.fillStyle = pill;
+  context.beginPath();
+  context.roundRect(pillX, pillY, pillWidth, pillHeight, pillHeight / 2);
+  context.fill();
+  context.fillStyle = '#1a1008';
+  context.fillText(phoneText, width / 2, pillY + pillHeight * 0.66);
+
+  context.fillStyle = POSTER_MUTED;
+  context.font = posterSans(width * 0.019);
+  context.fillText(note, width / 2, pillY + pillHeight + 46);
+  context.textAlign = 'left';
+}
+
+async function drawPricePoster(canvas) {
+  const families = priceFamilies();
+  const width = 1080;
+  const pad = 60;
+  const gap = 26;
+  const colWidth = (width - pad * 2 - gap) / 2;
+  const cardPad = 24;
+  const rowHeight = 40;
+  const headHeight = 168;
+  const cardHeight = family => cardPad * 2 + headHeight + family.prices.length * rowHeight + 14;
+
+  const pairs = [];
+  for (let index = 0; index < families.length; index += 2) pairs.push(families.slice(index, index + 2));
+  const pairHeights = pairs.map(pair => Math.max(...pair.map(cardHeight)));
+
+  const headerHeight = Math.round(width * 0.2) + 44 + Math.round(width * 0.155);
+  const footerHeight = 240;
+  const height = Math.round(headerHeight + pairHeights.reduce((total, item) => total + item + gap, 0) + footerHeight);
+
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  posterBackground(context, width, height);
+  const logo = await loadCanvasImage('assets/logo-aurea.jpg');
+  let y = drawPosterHeader(context, width, logo, 'Catálogo de balines', 'Precios al público · por unidad');
+
+  let position = 0;
+  pairs.forEach((pair, pairIndex) => {
+    pair.forEach((family, column) => {
+      const boxHeight = cardHeight(family);
+      const x = pad + column * (colWidth + gap);
+      const certified = family.line === 'certified';
+      const cardFill = context.createLinearGradient(x, y, x + colWidth, y + boxHeight);
+      cardFill.addColorStop(0, certified ? '#150e05' : '#100b07');
+      cardFill.addColorStop(1, certified ? '#2c1c08' : '#241710');
+      context.fillStyle = cardFill;
+      context.beginPath();
+      context.roundRect(x, y, colWidth, boxHeight, 20);
+      context.fill();
+      context.strokeStyle = certified ? 'rgba(212,158,58,.85)' : 'rgba(140,101,49,.6)';
+      context.lineWidth = certified ? 2.5 : 1.5;
+      context.stroke();
+
+      drawPosterHexBadge(context, x + colWidth / 2, y + cardPad + 14, 19, position + 1);
+
+      context.textAlign = 'center';
+      context.fillStyle = POSTER_GOLD;
+      context.font = posterFont(31);
+      wrapCanvasText(context, family.name, x + colWidth / 2, y + cardPad + 74, colWidth - cardPad * 2, 34, 1);
+      context.fillStyle = POSTER_MUTED;
+      context.font = posterSans(17);
+      wrapCanvasText(context, family.material, x + colWidth / 2, y + cardPad + 102, colWidth - cardPad * 2, 21, 1);
+
+      const beadCenterY = y + cardPad + 150;
+      const beadRadius = size => {
+        const millimeters = parseFloat(String(size).replace(',', '.'));
+        return Number.isFinite(millimeters) ? 9 + Math.min(8, Math.max(3, millimeters)) * 2.4 : 18;
+      };
+      const beads = family.prices.slice(0, 6);
+      const beadTotal = beads.reduce((total, [size]) => total + beadRadius(size) * 2 + 12, -12);
+      let beadX = x + colWidth / 2 - beadTotal / 2;
+      beads.forEach(([size]) => {
+        const radius = beadRadius(size);
+        drawPosterBead(context, beadX + radius, beadCenterY, radius, family.bead);
+        beadX += radius * 2 + 12;
+      });
+
+      context.textAlign = 'left';
+      let rowY = y + cardPad + headHeight + 26;
+      family.prices.forEach(([size, price]) => {
+        context.fillStyle = POSTER_GOLD;
+        context.font = posterSans(15);
+        context.fillText('◆', x + cardPad, rowY);
+        context.fillStyle = POSTER_CREAM;
+        context.font = posterFont(24);
+        context.fillText(size, x + cardPad + 24, rowY);
+        const sizeWidth = context.measureText(size).width;
+        context.font = posterFont(25, '700');
+        const priceText = posterMoney(price);
+        const priceWidth = context.measureText(priceText).width;
+        context.textAlign = 'right';
+        context.fillStyle = POSTER_CREAM;
+        context.fillText(priceText, x + colWidth - cardPad, rowY);
+        context.textAlign = 'left';
+        context.save();
+        context.setLineDash([2, 7]);
+        context.strokeStyle = 'rgba(233,198,125,.45)';
+        context.lineWidth = 2;
+        context.beginPath();
+        context.moveTo(x + cardPad + 34 + sizeWidth, rowY - 7);
+        context.lineTo(x + colWidth - cardPad - priceWidth - 12, rowY - 7);
+        context.stroke();
+        context.restore();
+        rowY += rowHeight;
+      });
+
+      if (family.note) {
+        context.textAlign = 'center';
+        context.fillStyle = 'rgba(220,201,173,.75)';
+        context.font = posterSans(15);
+        wrapCanvasText(context, family.note, x + colWidth / 2, y + boxHeight - cardPad + 2, colWidth - cardPad * 2, 18, 1);
+        context.textAlign = 'left';
+      }
+      position += 1;
+    });
+    y += pairHeights[pairIndex] + gap;
+  });
+
+  drawPosterFooter(context, width, y, height, 'Precios sujetos a disponibilidad. No incluye envío.');
+  return canvas;
+}
+
+async function drawBraceletPoster(canvas) {
+  const catalog = S.priceCatalog;
+  const family = priceFamilies().find(item => item.id === $('#bracelet-price-family')?.value)
+    || priceFamilies().find(item => item.braceletTable && item.prices.length);
+  if (!family) throw new Error('No hay una familia para la tabla de manillas');
+  const quantities = catalog.quantities;
+  const labor = number(catalog.labor);
+
+  const width = 1240;
+  const pad = 60;
+  const labelWidth = 130;
+  const cellWidth = (width - pad * 2 - labelWidth) / quantities.length;
+  const rowHeight = 62;
+  const headerHeight = Math.round(width * 0.2) + 44 + Math.round(width * 0.155);
+  const tableHeight = rowHeight * (family.prices.length + 1);
+  const height = Math.round(headerHeight + 90 + tableHeight + 300);
+
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  posterBackground(context, width, height);
+  const logo = await loadCanvasImage('assets/logo-aurea.jpg');
+  let y = drawPosterHeader(context, width, logo, 'Precio de la manilla', `${family.name} · mano de obra incluida`);
+
+  context.textAlign = 'center';
+  context.fillStyle = POSTER_MUTED;
+  context.font = posterSans(21);
+  context.fillText('Cuántos balines lleva la manilla', width / 2, y + 14);
+  context.textAlign = 'left';
+  y += 54;
+
+  const tableX = pad;
+  context.fillStyle = 'rgba(255,255,255,.03)';
+  context.beginPath();
+  context.roundRect(tableX, y, width - pad * 2, tableHeight, 18);
+  context.fill();
+  context.strokeStyle = 'rgba(140,101,49,.55)';
+  context.lineWidth = 1.5;
+  context.stroke();
+
+  // encabezado
+  context.save();
+  context.beginPath();
+  context.roundRect(tableX, y, width - pad * 2, rowHeight, [18, 18, 0, 0]);
+  context.clip();
+  const headFill = context.createLinearGradient(tableX, y, tableX + width, y + rowHeight);
+  headFill.addColorStop(0, '#17110d');
+  headFill.addColorStop(1, '#33240f');
+  context.fillStyle = headFill;
+  context.fillRect(tableX, y, width - pad * 2, rowHeight);
+  context.restore();
+
+  context.textAlign = 'center';
+  context.fillStyle = POSTER_GOLD;
+  context.font = posterSans(20, '700');
+  context.fillText('BALÍN', tableX + labelWidth / 2, y + rowHeight * 0.62);
+  quantities.forEach((quantity, index) => {
+    context.fillText(String(quantity), tableX + labelWidth + cellWidth * index + cellWidth / 2, y + rowHeight * 0.62);
+  });
+
+  family.prices.forEach(([size, price], index) => {
+    const rowY = y + rowHeight * (index + 1);
+    if (index % 2 === 0) {
+      context.fillStyle = 'rgba(255,255,255,.035)';
+      context.fillRect(tableX, rowY, width - pad * 2, rowHeight);
+    }
+    context.fillStyle = POSTER_GOLD;
+    context.font = posterFont(25, '700');
+    context.fillText(size, tableX + labelWidth / 2, rowY + rowHeight * 0.63);
+    context.fillStyle = POSTER_CREAM;
+    context.font = posterSans(22);
+    quantities.forEach((quantity, column) => {
+      context.fillText(
+        posterMoney(number(price) * quantity + labor),
+        tableX + labelWidth + cellWidth * column + cellWidth / 2,
+        rowY + rowHeight * 0.63
+      );
+    });
+    context.strokeStyle = 'rgba(140,101,49,.3)';
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(tableX, rowY);
+    context.lineTo(tableX + width - pad * 2, rowY);
+    context.stroke();
+  });
+
+  y += tableHeight + 46;
+  const neoprene = number(getPriceFamily('neopreno-oro')?.prices?.[0]?.[1]);
+  context.fillStyle = POSTER_MUTED;
+  context.font = posterSans(19);
+  context.fillText(
+    `Incluye ${posterMoney(labor)} de mano de obra.${neoprene > 0 ? ` Cada neopreno suma ${posterMoney(neoprene)}.` : ''}`,
+    width / 2, y
+  );
+  context.textAlign = 'left';
+
+  drawPosterFooter(context, width, y + 10, height, 'Precios sujetos a disponibilidad. No incluye envío.');
+  return canvas;
+}
+
+function currentPosterMode() {
+  return $('.poster-tab.active')?.dataset.poster || 'prices';
+}
+
+async function renderPricePoster() {
+  const canvas = $('#price-poster-canvas');
+  const details = $('#price-poster-card');
+  if (!canvas || !details?.open) return;
+  const status = $('#price-poster-status');
+  try {
+    if (status) status.textContent = 'Armando el afiche…';
+    await (currentPosterMode() === 'bracelet' ? drawBraceletPoster(canvas) : drawPricePoster(canvas));
+    if (status) status.textContent = 'Se arma solo con los precios de arriba.';
+  } catch (error) {
+    if (status) status.textContent = error.message || 'No fue posible armar el afiche';
+  }
+}
+
+function showPosterTab(mode) {
+  $$('.poster-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.poster === mode));
+  renderPricePoster();
+}
+
+async function downloadPricePoster(mode, buttonId = '#download-price-poster-btn') {
+  const target = mode || currentPosterMode();
+  const button = $(buttonId);
+  const original = button?.textContent;
+  if (button) { button.classList.add('loading'); button.textContent = 'Preparando…'; }
+  try {
+    const canvas = document.createElement('canvas');
+    await (target === 'bracelet' ? drawBraceletPoster(canvas) : drawPricePoster(canvas));
+    const blob = await new Promise((resolve, reject) =>
+      canvas.toBlob(item => item ? resolve(item) : reject(new Error('No fue posible preparar la descarga')), 'image/jpeg', 0.94));
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `aurea-${target === 'bracelet' ? 'precio-manillas' : 'catalogo-precios'}-${new Date().toISOString().slice(0, 10)}.jpg`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast('Afiche descargado');
+  } catch (error) {
+    toast(error.message || 'No fue posible descargar el afiche');
+  } finally {
+    if (button) { button.classList.remove('loading'); button.textContent = original; }
+  }
+}
+
 function productionLotNumber(id, date) {
   return `LOT-${String(date || new Date().toISOString()).slice(0, 10).replaceAll('-', '')}-${shortId(id)}`;
 }
@@ -2818,6 +3548,14 @@ function bindEvents() {
   $('#material-status').onchange = renderInventory;
   $('#public-price-search').oninput = renderPublicPrices;
   $('#public-price-line').onchange = renderPublicPrices;
+  $('#bracelet-price-family').onchange = renderBraceletPrices;
+  $('#add-price-family-btn').onclick = () => openPriceFamily();
+  $('#price-settings-btn').onclick = openPriceSettings;
+  $('#reset-prices-btn').onclick = resetPriceCatalog;
+  $('#price-poster-card').ontoggle = renderPricePoster;
+  $$('.poster-tab').forEach(tab => { tab.onclick = () => showPosterTab(tab.dataset.poster); });
+  $('#download-price-poster-btn').onclick = () => downloadPricePoster();
+  $('#download-catalog-poster-btn').onclick = () => downloadPricePoster('prices', '#download-catalog-poster-btn');
   $('#add-material-btn').onclick = () => openMaterial();
   $('#new-purchase-btn').onclick = () => openPurchase();
 
@@ -2882,6 +3620,8 @@ Object.assign(window, {
   AureaDiagnostics: Object.freeze({ schemaVersion: SCHEMA_VERSION, normalizeState: value => normalizeState(clone(value)) }),
   openUserGuide, guideGo, runSetupAction,
   closeModal, openMaterial, saveMaterial, toggleMaterial, deleteMaterial,
+  openPriceFamily, closePriceFamily, savePriceFamily, deletePriceFamily,
+  addPriceRow, removePriceRow, openPriceSettings, savePriceSettings, resetPriceCatalog,
   openPurchase, savePurchase, annulPurchase,
   changeComponentQty, removeComponent,
   loadDesign, showView,
