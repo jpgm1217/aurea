@@ -74,6 +74,20 @@ const PRICE_LINES = Object.freeze([
 const PRICE_BEADS = Object.freeze(['certificado', 'liso', 'diamantado', 'italiano', 'balin-x', 'neopreno']);
 const DEFAULT_PRICE_QUANTITIES = Object.freeze([3, 5, 7, 10, 12, 15, 18, 20]);
 const DEFAULT_PRICE_LABOR = 15000;
+const DEFAULT_PRICE_MODELS = Object.freeze([
+  {
+    id: 'siete-nudos',
+    name: 'Manilla 7 Nudos',
+    note: 'Modelo fijo: se calcula con 6 balines.',
+    quantities: [6]
+  },
+  {
+    id: 'san-benito',
+    name: 'Manilla San Benito',
+    note: 'Combinaciones pares desde 2 hasta 16 balines.',
+    quantities: [2, 4, 6, 8, 10, 12, 14, 16]
+  }
+]);
 
 // Precios al público. Los de oro 18K vienen de "Precios_Manillas_Oro18K.xlsx"
 // (costo promedio + 30% de margen). Son editables desde la pestaña Precios.
@@ -153,6 +167,7 @@ const DEFAULT_PRICE_FAMILIES = Object.freeze([
 const defaultPriceCatalog = () => ({
   labor: DEFAULT_PRICE_LABOR,
   quantities: [...DEFAULT_PRICE_QUANTITIES],
+  models: DEFAULT_PRICE_MODELS.map(model => ({ ...model, quantities: [...model.quantities] })),
   families: DEFAULT_PRICE_FAMILIES.map(family => ({ ...family, prices: family.prices.map(row => [...row]) }))
 });
 
@@ -198,6 +213,8 @@ let editingExpenseId = null;
 let editingPurchaseId = null;
 let editingPriceFamilyId = null;
 let priceFamilyDraft = null;
+let editingPriceModelId = null;
+let priceModelDraft = null;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -316,9 +333,32 @@ function normalizePriceCatalog(raw) {
     .filter(value => value >= 1 && value <= 200))]
     .sort((a, b) => a - b)
     .slice(0, 10);
+  const modelsSource = Array.isArray(source.models) && source.models.length ? source.models : fallback.models;
+  const usedModelIds = new Set();
+  const models = modelsSource
+    .filter(item => item && typeof item === 'object' && (item.id || item.name))
+    .map((item, index) => {
+      let id = cleanCode(item.id || item.name).toLowerCase() || `modelo-${index + 1}`;
+      while (usedModelIds.has(id)) id = `${id.slice(0, 25)}-${index + 1}`;
+      usedModelIds.add(id);
+      const modelQuantities = [...new Set((Array.isArray(item.quantities) ? item.quantities : [])
+        .map(value => Math.floor(number(value)))
+        .filter(value => value >= 1 && value <= 200))]
+        .sort((a, b) => a - b)
+        .slice(0, 20);
+      return {
+        id,
+        name: String(item.name || 'Sin nombre').trim().slice(0, 60) || 'Sin nombre',
+        note: String(item.note || '').trim().slice(0, 180),
+        quantities: modelQuantities
+      };
+    })
+    .filter(model => model.quantities.length)
+    .slice(0, 20);
   return {
     labor: Math.max(0, Math.round(number(source.labor ?? fallback.labor))),
     quantities: quantities.length ? quantities : [...fallback.quantities],
+    models: models.length ? models : fallback.models,
     families: families.length ? families : fallback.families
   };
 }
@@ -1176,6 +1216,7 @@ function renderPublicPrices() {
     </article>
   `).join('') : '<div class="empty public-price-empty"><b>Sin resultados</b>Prueba con otro nombre o tamaño.</div>';
   renderBraceletPrices();
+  renderPriceModels();
   renderPricePoster();
 }
 
@@ -1209,6 +1250,142 @@ function renderBraceletPrices() {
   const neoprene = number(getPriceFamily('neopreno-oro')?.prices?.[0]?.[1]);
   foot.innerHTML = `Fórmula: <b>(nº de balines × precio unitario) + ${money(labor)} de mano de obra</b>.`
     + (neoprene > 0 ? ` Si la manilla lleva neoprenos, suma ${money(neoprene)} por cada uno.` : '');
+}
+
+const priceModels = () => (S.priceCatalog?.models || []);
+const getPriceModel = id => priceModels().find(model => model.id === id) || null;
+const beadSizeLabel = size => {
+  const match = String(size || '').match(/\d+(?:[.,]\d+)?/);
+  return match ? `#${match[0].replace(',', '.')}` : String(size || 'Balín');
+};
+const priceRowsDescending = family => [...(family?.prices || [])].sort((a, b) => {
+  const aSize = Number.parseFloat(String(a[0]).replace(',', '.')) || 0;
+  const bSize = Number.parseFloat(String(b[0]).replace(',', '.')) || 0;
+  return bSize - aSize;
+});
+
+function renderPriceModels() {
+  const list = $('#model-price-list');
+  const addons = $('#model-price-addons');
+  if (!list || !addons) return;
+  const models = priceModels();
+  const families = priceFamilies().filter(family => family.braceletTable && family.prices.length);
+  const labor = number(S.priceCatalog?.labor);
+
+  if (!models.length || !families.length) {
+    list.innerHTML = '<div class="empty model-price-empty"><b>Falta información</b>Agrega al menos una manilla y una familia de balines.</div>';
+  } else {
+    list.innerHTML = models.map(model => {
+      const quantities = model.quantities;
+      const quantityText = quantities.length === 1
+        ? `${quantities[0]} balines`
+        : `${quantities[0]} a ${quantities.at(-1)} balines · ${quantities.join(', ')}`;
+      return `<article class="model-price-card" data-price-model="${esc(model.id)}">
+        <header class="model-price-head">
+          <div>
+            <span class="model-price-kicker">${esc(quantityText)}</span>
+            <h4>${esc(model.name)}</h4>
+            <p>${esc(model.note || 'Precios calculados con el catálogo vigente.')}</p>
+          </div>
+          <button class="public-price-edit" type="button" onclick="openPriceModel('${esc(model.id)}')">Editar</button>
+        </header>
+        <div class="model-family-list">
+          ${families.map((family, familyIndex) => `<details class="model-family ${esc(family.line)}" data-model-family="${esc(family.id)}" ${familyIndex < 2 ? 'open' : ''}>
+            <summary>
+              <span class="public-price-bead ${esc(family.bead)}" aria-hidden="true"></span>
+              <span><b>${esc(family.name)}</b><small>${esc(priceLineLabel(family.line))} · ${esc(family.material)}</small></span>
+            </summary>
+            <div class="model-price-scroll">
+              <table class="model-price-table">
+                <thead><tr><th scope="col">Balín</th>${quantities.map(qty => `<th scope="col">${qty}</th>`).join('')}</tr></thead>
+                <tbody>${priceRowsDescending(family).map(([size, unitPrice]) => `<tr>
+                  <th scope="row">${esc(beadSizeLabel(size))}</th>
+                  ${quantities.map(qty => `<td data-size="${esc(size)}" data-qty="${qty}">${money(number(unitPrice) * qty + labor)}</td>`).join('')}
+                </tr>`).join('')}</tbody>
+              </table>
+            </div>
+          </details>`).join('')}
+        </div>
+        <p class="model-price-formula">Incluye ${money(labor)} de mano de obra. Dijes, neoprenos y otros adicionales se suman aparte.</p>
+      </article>`;
+    }).join('');
+  }
+
+  const neoprenes = priceFamilies().filter(family => family.bead === 'neopreno' && family.prices.length);
+  addons.innerHTML = `<div class="model-addon-head"><div><span class="guide-label">Adicionales</span><h4>Neoprenos</h4></div><p>Suma el valor por cada neopreno que lleve la manilla.</p></div>
+    <div class="model-addon-grid">${neoprenes.length ? neoprenes.flatMap(family => family.prices.map(([size, price]) => `
+      <div class="model-addon-row" data-addon-family="${esc(family.id)}" data-addon-size="${esc(size)}">
+        <div><b>${esc(family.name)}</b><span>${esc(family.material)} · ${esc(size)}</span></div>
+        <strong>+ ${money(price)} c/u</strong>
+      </div>`)).join('') : '<div class="empty"><b>Sin neoprenos</b>Agrega sus precios en una familia del catálogo.</div>'}</div>`;
+}
+
+function openPriceModel(id = '') {
+  const existing = id ? getPriceModel(id) : null;
+  editingPriceModelId = existing ? existing.id : null;
+  priceModelDraft = existing
+    ? { ...existing, quantities: [...existing.quantities] }
+    : { id: '', name: '', note: '', quantities: [6] };
+  openModal(`<div class="modal-head"><h3>${existing ? 'Editar' : 'Nueva'} manilla de la lista</h3><button class="modal-close" onclick="closePriceModel()">×</button></div>
+    <div class="form-grid two">
+      <div class="field"><label>Nombre del modelo</label><input class="input" id="pm-name" maxlength="60" value="${esc(priceModelDraft.name)}" placeholder="Ej. Manilla Virgen del Carmen"></div>
+      <div class="field"><label>Cantidades de balines</label><input class="input" id="pm-quantities" inputmode="numeric" value="${esc(priceModelDraft.quantities.join(', '))}" placeholder="Ej. 2, 4, 6, 8"></div>
+      <div class="field full"><label>Descripción</label><input class="input" id="pm-note" maxlength="180" value="${esc(priceModelDraft.note)}" placeholder="Ej. Modelo fijo con 6 balines."></div>
+    </div>
+    <p class="help">Escribe todas las cantidades que ofrece el modelo separadas por coma. La lista calculará cada tamaño en oro y oro laminado.</p>
+    <div class="modal-actions">
+      ${existing ? '<button class="btn btn-danger" onclick="deletePriceModel()">Eliminar</button>' : ''}
+      <button class="btn btn-outline" onclick="closePriceModel()">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePriceModel()">Guardar</button>
+    </div>`);
+}
+
+function closePriceModel() {
+  editingPriceModelId = null;
+  priceModelDraft = null;
+  closeModal();
+}
+
+function savePriceModel() {
+  const name = String($('#pm-name')?.value || '').trim();
+  const note = String($('#pm-note')?.value || '').trim();
+  const quantities = [...new Set((String($('#pm-quantities')?.value || '').match(/\d+/g) || [])
+    .map(value => Math.floor(number(value)))
+    .filter(value => value >= 1 && value <= 200))]
+    .sort((a, b) => a - b)
+    .slice(0, 20);
+  if (!name) { toast('Ponle un nombre a la manilla'); return; }
+  if (!quantities.length) { toast('Escribe al menos una cantidad de balines'); return; }
+  const models = priceModels().map(model => ({ ...model, quantities: [...model.quantities] }));
+  const index = models.findIndex(model => model.id === editingPriceModelId);
+  let id = editingPriceModelId;
+  if (!id) {
+    id = cleanCode(name).toLowerCase() || `modelo-${shortId(uid('modelo')).toLowerCase()}`;
+    let suffix = 2;
+    const base = id;
+    while (models.some(model => model.id === id)) { id = `${base.slice(0, 25)}-${suffix}`; suffix += 1; }
+  }
+  const next = { id, name: name.slice(0, 60), note: note.slice(0, 180), quantities };
+  if (index >= 0) models[index] = next;
+  else models.push(next);
+  S.priceCatalog = normalizePriceCatalog({ ...S.priceCatalog, models });
+  closePriceModel();
+  persist();
+  toast('Lista de la manilla guardada');
+}
+
+function deletePriceModel() {
+  if (!editingPriceModelId) return;
+  const models = priceModels();
+  if (models.length <= 1) { toast('Debe quedar al menos una manilla en la lista'); return; }
+  if (!confirm('¿Quitar esta manilla de la lista rápida? Los precios por balín no se modificarán.')) return;
+  S.priceCatalog = normalizePriceCatalog({
+    ...S.priceCatalog,
+    models: models.filter(model => model.id !== editingPriceModelId)
+  });
+  closePriceModel();
+  persist();
+  toast('Manilla retirada de la lista');
 }
 
 function openPriceFamily(id = '') {
@@ -1370,7 +1547,7 @@ function savePriceSettings() {
 }
 
 function resetPriceCatalog() {
-  if (!confirm('¿Restaurar la lista de precios a los valores de fábrica? Se perderán los precios que hayas escrito.')) return;
+  if (!confirm('¿Restaurar precios y modelos a los valores de fábrica? Se perderán los cambios que hayas escrito en esta sección.')) return;
   S.priceCatalog = defaultPriceCatalog();
   persist();
   renderPublicPrices();
@@ -3550,6 +3727,7 @@ function bindEvents() {
   $('#public-price-line').onchange = renderPublicPrices;
   $('#bracelet-price-family').onchange = renderBraceletPrices;
   $('#add-price-family-btn').onclick = () => openPriceFamily();
+  $('#add-price-model-btn').onclick = () => openPriceModel();
   $('#price-settings-btn').onclick = openPriceSettings;
   $('#reset-prices-btn').onclick = resetPriceCatalog;
   $('#price-poster-card').ontoggle = renderPricePoster;
@@ -3621,6 +3799,7 @@ Object.assign(window, {
   openUserGuide, guideGo, runSetupAction,
   closeModal, openMaterial, saveMaterial, toggleMaterial, deleteMaterial,
   openPriceFamily, closePriceFamily, savePriceFamily, deletePriceFamily,
+  openPriceModel, closePriceModel, savePriceModel, deletePriceModel,
   addPriceRow, removePriceRow, openPriceSettings, savePriceSettings, resetPriceCatalog,
   openPurchase, savePurchase, annulPurchase,
   changeComponentQty, removeComponent,

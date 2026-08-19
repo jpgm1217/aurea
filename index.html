@@ -53,6 +53,7 @@
           <div class="brand-sub">Joyas hechas con amor, brillo y esencia</div>
         </div>
         <div class="topbar-actions">
+          <button class="top-price-button" data-go="prices" type="button" aria-label="Abrir lista de precios"><span>◇</span><b>Lista de precios</b></button>
           <button class="help-button" id="open-user-guide-btn" type="button" aria-label="Abrir guía de uso">? <span>Ayuda</span></button>
           <div class="sync" id="sync"><span class="sync-dot"></span><span id="sync-text">Local</span></div>
         </div>
@@ -70,12 +71,12 @@
           <h1>Inventario, diseños, ventas y utilidad.</h1>
           <p>Controla cada material y calcula precios rentables con costos reales.</p>
           <div class="quick-actions">
+            <button class="quick quick-prices" data-go="prices"><strong>◇ VER LISTA DE PRECIOS</strong><span>7 Nudos, San Benito, oro y oro laminado</span></button>
             <button class="quick" data-go="designer"><strong>＋ Diseñar manilla</strong><span>Materiales y precio sugerido</span></button>
             <button class="quick" data-go="inventory"><strong>＋ Registrar compra</strong><span>Actualizar stock y costos</span></button>
             <button class="quick" data-go="management" data-tab="production"><strong>＋ Fabricar manillas</strong><span>Convertir materiales en producto listo</span></button>
             <button class="quick" data-action="new-sale"><strong>＋ Registrar venta</strong><span>Ingreso y utilidad</span></button>
             <button class="quick" data-go="management" data-tab="expenses"><strong>＋ Registrar gasto</strong><span>Control de utilidad neta</span></button>
-            <button class="quick" data-go="prices"><strong>◈ Ver precios al público</strong><span>Consulta rápida para atender clientes</span></button>
           </div>
         </div>
 
@@ -142,7 +143,20 @@
           <button class="btn btn-primary btn-sm" id="download-catalog-poster-btn" type="button">Descargar afiche</button>
         </div>
 
-        <div class="guided-tip"><span>◈</span><div><b>¿Cómo usar esta lista?</b><p>Arriba tienes el <strong>precio por balín suelto</strong> y abajo el <strong>precio de la manilla ya armada</strong> según cuántos lleve. Toca <strong>Editar</strong> en cualquier tarjeta para cambiar un precio: se guarda en la nube y no modifica inventario, costos ni ventas.</p></div></div>
+        <div class="guided-tip"><span>◈</span><div><b>¿Cómo usar esta lista?</b><p>Primero encontrarás la <strong>Lista rápida por modelo</strong> con 7 Nudos, San Benito y las nuevas manillas que agregues. Más abajo están los precios por balín suelto. Todos los valores se recalculan con los precios vigentes.</p></div></div>
+
+        <section class="model-price-section" id="model-price-section">
+          <div class="model-price-section-head">
+            <div>
+              <span class="guide-label">Por modelo</span>
+              <h3>Lista rápida de manillas</h3>
+              <p>Consulta cada modelo por número y tamaño de balines. Compara oro 18K con todos los estilos disponibles en oro laminado.</p>
+            </div>
+            <button class="btn btn-soft btn-sm" id="add-price-model-btn" type="button">＋ Nueva manilla</button>
+          </div>
+          <div class="model-price-list" id="model-price-list"></div>
+          <aside class="model-addon-card" id="model-price-addons"></aside>
+        </section>
 
         <div class="public-price-toolbar">
           <input class="input" id="public-price-search" placeholder="Buscar liso, diamantado, 6 mm...">

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'aurea-pwa-';
-const CACHE = `${CACHE_PREFIX}v15-afiche-generado`;
+const CACHE = `${CACHE_PREFIX}v18-acceso-precios-visible`;
 const APP_SHELL = [
   './',
   './index.html',
