@@ -152,7 +152,10 @@
               <h3>Lista rápida de manillas</h3>
               <p>Consulta cada modelo por número y tamaño de balines. Compara oro 18K con todos los estilos disponibles en oro laminado.</p>
             </div>
-            <button class="btn btn-soft btn-sm" id="add-price-model-btn" type="button">＋ Nueva manilla</button>
+            <div class="model-price-actions">
+              <button class="btn btn-soft btn-sm" id="add-price-model-btn" type="button">＋ Nueva manilla</button>
+              <button class="btn btn-outline btn-sm" id="add-price-addon-btn" type="button">＋ Nuevo dije</button>
+            </div>
           </div>
           <div class="model-price-list" id="model-price-list"></div>
           <aside class="model-addon-card" id="model-price-addons"></aside>
@@ -165,6 +168,7 @@
             <option value="certified">Oro 18K</option>
             <option value="laminated">Oro laminado 18K</option>
             <option value="neoprene">Neopreno argollado</option>
+            <option value="addon">Dijes y adicionales</option>
           </select>
         </div>
 
@@ -197,6 +201,11 @@
           <div class="poster-tabs">
             <button class="tab poster-tab active" type="button" data-poster="prices">Precio por balín</button>
             <button class="tab poster-tab" type="button" data-poster="bracelet">Precio de la manilla</button>
+            <button class="tab poster-tab" type="button" data-poster="model">Por modelo</button>
+          </div>
+          <div class="poster-pickers hidden" id="poster-pickers">
+            <select class="input" id="poster-model" aria-label="Modelo para el afiche"></select>
+            <select class="input" id="poster-model-family" aria-label="Material para el afiche"></select>
           </div>
           <div class="price-poster-stage">
             <canvas id="price-poster-canvas" aria-label="Afiche de precios al público de Aurea"></canvas>
