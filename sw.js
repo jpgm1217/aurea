@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'aurea-pwa-';
-const CACHE = `${CACHE_PREFIX}v21-afiche-modelos`;
+const CACHE = `${CACHE_PREFIX}v22-precios-septiembre`;
 const APP_SHELL = [
   './',
   './index.html',

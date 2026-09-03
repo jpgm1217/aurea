@@ -73,8 +73,10 @@ const PRICE_LINES = Object.freeze([
   { value: 'addon', label: 'Dijes y adicionales' }
 ]);
 const PRICE_BEADS = Object.freeze(['certificado', 'liso', 'diamantado', 'italiano', 'balin-x', 'neopreno', 'dije']);
-const DEFAULT_PRICE_QUANTITIES = Object.freeze([3, 5, 7, 10, 12, 15, 18, 20]);
-const DEFAULT_PRICE_LABOR = 15000;
+const DEFAULT_PRICE_QUANTITIES = Object.freeze([2, 4, 6, 8, 10, 12, 14, 16, 18, 20]);
+// Base fija pública: $15.000 de mano de obra + $10.000 de empaque.
+// La propiedad sigue llamándose `labor` para conservar compatibilidad con respaldos anteriores.
+const DEFAULT_PRICE_LABOR = 25000;
 const DEFAULT_PRICE_MODELS = Object.freeze([
   {
     id: 'siete-nudos',
@@ -142,9 +144,9 @@ const DEFAULT_PRICE_FAMILIES = Object.freeze([
     material: 'Oro laminado 18K',
     line: 'laminated',
     bead: 'italiano',
-    note: '6 mm agotado en el proveedor.',
+    note: 'Disponible en tamaños de 3, 4, 5 y 6 mm.',
     braceletTable: true,
-    prices: [['3 mm', 11000], ['4 mm', 12000], ['5 mm', 15000]]
+    prices: [['3 mm', 11000], ['4 mm', 12000], ['5 mm', 15000], ['6 mm', 19000]]
   },
   {
     id: 'balin-x',
@@ -178,22 +180,45 @@ const DEFAULT_PRICE_FAMILIES = Object.freeze([
   }
 ]);
 
-// Siembra unica para datos ya guardados en Firebase. Sube el numero cuando haya
-// que agregar algo nuevo de fabrica a catalogos que ya existen.
+// Siembras únicas para datos ya guardados en Firebase. Sube el número cuando haya
+// que agregar o actualizar valores oficiales en catálogos que ya existen.
 // 2 = dije San Benito como adicional de la manilla San Benito.
-const PRICE_CATALOG_SEED = 2;
+// 3 = lista vigente 03/09/2026: base fija $25.000, cantidades pares e italiano 6 mm.
+const PRICE_CATALOG_SEED = 3;
+const OFFICIAL_BEAD_PRICE_FAMILIES = Object.freeze(['certificado', 'liso', 'diamantado', 'italiano', 'balin-x']);
 
 function seedPriceCatalog(catalog, appliedSeed) {
-  if (number(appliedSeed) >= PRICE_CATALOG_SEED) return catalog;
-  const template = DEFAULT_PRICE_FAMILIES.find(family => family.id === 'dije-san-benito');
-  if (template && !catalog.families.some(family => family.id === template.id)) {
-    catalog.families = [...catalog.families, { ...template, prices: template.prices.map(row => [...row]) }];
+  const seed = number(appliedSeed);
+  if (seed < 2) {
+    const template = DEFAULT_PRICE_FAMILIES.find(family => family.id === 'dije-san-benito');
+    if (template && !catalog.families.some(family => family.id === template.id)) {
+      catalog.families = [...catalog.families, { ...template, prices: template.prices.map(row => [...row]) }];
+    }
+    catalog.models = catalog.models.map(model => (
+      model.id === 'san-benito' && !(model.addons || []).length
+        ? { ...model, addons: ['dije-san-benito'] }
+        : model
+    ));
   }
-  catalog.models = catalog.models.map(model => (
-    model.id === 'san-benito' && !(model.addons || []).length
-      ? { ...model, addons: ['dije-san-benito'] }
-      : model
-  ));
+
+  if (seed < 3) {
+    const official = new Map(DEFAULT_PRICE_FAMILIES
+      .filter(family => OFFICIAL_BEAD_PRICE_FAMILIES.includes(family.id))
+      .map(family => [family.id, family]));
+    // Actualiza una sola vez las familias oficiales presentes, sin revivir familias que
+    // la usuaria haya eliminado ni tocar dijes, neoprenos o familias personalizadas.
+    catalog.families = catalog.families.map(family => {
+      const template = official.get(family.id);
+      if (!template) return family;
+      return {
+        ...family,
+        note: family.id === 'italiano' ? template.note : family.note,
+        prices: template.prices.map(row => [...row])
+      };
+    });
+    catalog.labor = DEFAULT_PRICE_LABOR;
+    catalog.quantities = [...DEFAULT_PRICE_QUANTITIES];
+  }
   return catalog;
 }
 
@@ -713,7 +738,11 @@ async function commitCriticalInternal(operationId, mutate) {
 
 async function migrateRemoteState(snapshot) {
   const raw = snapshot.exists() ? snapshot.val() : null;
-  if (raw?.schemaVersion === SCHEMA_VERSION) return normalizeState(raw);
+  // El catálogo tiene su propia versión. Si sube, persistimos sus nuevos valores oficiales
+  // aunque la estructura general de inventario y ventas no haya cambiado.
+  if (raw?.schemaVersion === SCHEMA_VERSION && number(raw?.priceCatalog?.seed) >= PRICE_CATALOG_SEED) {
+    return normalizeState(raw);
+  }
   const result = await db.ref(DATA_PATH).transaction(currentRaw => {
     const next = normalizeState(currentRaw || S);
     next.schemaVersion = SCHEMA_VERSION;
@@ -1287,7 +1316,7 @@ function renderBraceletPrices() {
       </tr>
     `).join('')}</tbody>`;
   const neoprene = number(getPriceFamily('neopreno-oro')?.prices?.[0]?.[1]);
-  foot.innerHTML = `Fórmula: <b>(nº de balines × precio unitario) + ${money(labor)} de mano de obra</b>.`
+  foot.innerHTML = `Fórmula: <b>(nº de balines × precio unitario) + ${money(labor)} de base fija</b> (mano de obra y empaque).`
     + (neoprene > 0 ? ` Si la manilla lleva neoprenos, suma ${money(neoprene)} por cada uno.` : '');
 }
 
@@ -1348,7 +1377,7 @@ function modelAddonChips(model) {
 function modelAddonSummary(model, labor) {
   const included = modelAddonFamilies(model);
   if (!included.length) {
-    return `Incluye ${money(labor)} de mano de obra. Dijes, neoprenos y otros adicionales se suman aparte.`;
+    return `Incluye ${money(labor)} de base fija (mano de obra y empaque). Dijes, neoprenos y otros adicionales se suman aparte.`;
   }
   const detail = included.map(family => {
     const values = family.prices.map(([, price]) => number(price));
@@ -1356,7 +1385,7 @@ function modelAddonSummary(model, labor) {
     const max = Math.max(...values);
     return `${esc(family.name)} (${min === max ? money(min) : `${money(min)} a ${money(max)} segun el balin`})`;
   }).join(' y ');
-  return `Incluye ${money(labor)} de mano de obra y ${detail}. Neoprenos y otros adicionales se suman aparte.`;
+  return `Incluye ${money(labor)} de base fija (mano de obra y empaque) y ${detail}. Neoprenos y otros adicionales se suman aparte.`;
 }
 
 function renderPriceModels() {
@@ -1551,7 +1580,7 @@ function renderPriceFamilyModal() {
       <div class="field"><label>Descripción corta</label><input class="input" id="pf-material" maxlength="90" value="${esc(draft.material)}" placeholder="Ej. Oro laminado 18K"></div>
       <div class="field"><label>Línea</label><select class="input" id="pf-line">${PRICE_LINES.map(option => `<option value="${option.value}" ${draft.line === option.value ? 'selected' : ''}>${esc(option.label)}</option>`).join('')}</select></div>
       <div class="field"><label>Apariencia del balín</label><select class="input" id="pf-bead">${PRICE_BEADS.map(bead => `<option value="${bead}" ${draft.bead === bead ? 'selected' : ''}>${bead === 'balin-x' ? 'Balín X' : bead[0].toUpperCase() + bead.slice(1)}</option>`).join('')}</select></div>
-      <div class="field full"><label>Nota para el cliente</label><input class="input" id="pf-note" maxlength="180" value="${esc(draft.note)}" placeholder="Ej. 6 mm agotado en el proveedor."></div>
+      <div class="field full"><label>Nota para el cliente</label><input class="input" id="pf-note" maxlength="180" value="${esc(draft.note)}" placeholder="Ej. Consulta colores y tamaños disponibles."></div>
     </div>
 
     <div class="pf-rows-head">
@@ -1644,12 +1673,12 @@ function deletePriceFamily() {
 
 function openPriceSettings() {
   const catalog = S.priceCatalog;
-  openModal(`<div class="modal-head"><h3>Mano de obra y cantidades</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+  openModal(`<div class="modal-head"><h3>Base fija y cantidades</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="form-grid">
       <div class="field">
-        <label>Mano de obra por manilla</label>
+        <label>Base fija por manilla</label>
         <input class="input" id="pc-labor" type="number" min="0" step="500" value="${number(catalog.labor)}">
-        <span class="help">Se suma una sola vez al precio de la manilla completa. No cambia el costeo de Diseñar.</span>
+        <span class="help">Se suma una sola vez al precio final. El valor vigente incluye $15.000 de mano de obra y $10.000 de empaque. No cambia el costeo de Diseñar.</span>
       </div>
       <div class="field">
         <label>Cantidades de la tabla</label>
@@ -1669,7 +1698,7 @@ function savePriceSettings() {
     .split(/[^\d]+/)
     .map(value => Math.floor(number(value)))
     .filter(value => value >= 1 && value <= 200);
-  if (labor < 0) { toast('La mano de obra no puede ser negativa'); return; }
+  if (labor < 0) { toast('La base fija no puede ser negativa'); return; }
   if (!quantities.length) { toast('Escribe al menos una cantidad, por ejemplo 3, 5, 10'); return; }
   S.priceCatalog = normalizePriceCatalog({ ...S.priceCatalog, labor, quantities });
   persist();
@@ -3056,7 +3085,7 @@ async function drawBraceletPoster(canvas) {
   const context = canvas.getContext('2d');
   posterBackground(context, width, height);
   const logo = await loadCanvasImage('assets/logo-aurea.jpg');
-  let y = drawPosterHeader(context, width, logo, 'Precio de la manilla', `${family.name} · mano de obra incluida`);
+  let y = drawPosterHeader(context, width, logo, 'Precio de la manilla', `${family.name} · base fija incluida`);
 
   context.textAlign = 'center';
   context.fillStyle = POSTER_MUTED;
@@ -3125,7 +3154,7 @@ async function drawBraceletPoster(canvas) {
   context.fillStyle = POSTER_MUTED;
   context.font = posterSans(19);
   context.fillText(
-    `Incluye ${posterMoney(labor)} de mano de obra.${neoprene > 0 ? ` Cada neopreno suma ${posterMoney(neoprene)}.` : ''}`,
+    `Incluye ${posterMoney(labor)} de base fija (mano de obra y empaque).${neoprene > 0 ? ` Cada neopreno suma ${posterMoney(neoprene)}.` : ''}`,
     width / 2, y
   );
   context.textAlign = 'left';
@@ -3177,7 +3206,7 @@ async function drawModelPoster(canvas) {
   const context = canvas.getContext('2d');
   posterBackground(context, width, height);
   const logo = await loadCanvasImage('assets/logo-aurea.jpg');
-  let y = drawPosterHeader(context, width, logo, model.name, `${family.name} · mano de obra incluida`);
+  let y = drawPosterHeader(context, width, logo, model.name, `${family.name} · base fija incluida`);
 
   context.textAlign = 'center';
   context.fillStyle = POSTER_MUTED;
@@ -3244,7 +3273,7 @@ async function drawModelPoster(canvas) {
   y += tableHeight + 46;
   context.fillStyle = POSTER_MUTED;
   context.font = posterSans(19);
-  context.fillText(`Incluye ${posterMoney(labor)} de mano de obra.`, width / 2, y);
+  context.fillText(`Incluye ${posterMoney(labor)} de base fija.`, width / 2, y);
   if (addons.length) {
     y += 32;
     context.fillStyle = POSTER_GOLD;
