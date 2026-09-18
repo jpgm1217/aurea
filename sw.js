@@ -1,11 +1,12 @@
 const CACHE_PREFIX = 'aurea-pwa-';
-const CACHE = `${CACHE_PREFIX}v22-precios-septiembre`;
+const CACHE = `${CACHE_PREFIX}v23-cotizador-catalogo`;
 const APP_SHELL = [
   './',
   './index.html',
   './manifest.json',
   './css/styles.css',
   './js/domain.js',
+  './js/quote-catalog.js',
   './js/app.js',
   './assets/logo-aurea.jpg',
   './assets/icon-192.png',

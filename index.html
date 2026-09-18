@@ -145,6 +145,39 @@
 
         <div class="guided-tip"><span>◈</span><div><b>¿Cómo usar esta lista?</b><p>Primero encontrarás la <strong>Lista rápida por modelo</strong> con 7 Nudos, San Benito y las nuevas manillas que agregues. Más abajo están los precios por balín suelto. Todos los valores se recalculan con los precios vigentes.</p></div></div>
 
+        <section class="quote-tool" id="quote-tool">
+          <div class="quote-tool-head">
+            <div>
+              <span class="guide-label">Cotizador del catálogo</span>
+              <h3>Cotizar como en el Excel</h3>
+              <p>Elige el código de la manilla, tipo y tamaño de balín. La app calcula Todo Laminado, Mixto y Todo Oro sin tocar inventario ni ventas.</p>
+            </div>
+            <button class="btn btn-outline btn-sm admin-only" id="edit-quote-product-btn" type="button">Editar modelo</button>
+          </div>
+          <div class="quote-controls">
+            <div class="field">
+              <label>Manilla del catálogo</label>
+              <select class="input" id="quote-product"></select>
+            </div>
+            <div class="field">
+              <label>Tipo / tamaño de balín</label>
+              <select class="input" id="quote-variant"></select>
+            </div>
+            <div class="field">
+              <label>Cantidad si cambia</label>
+              <input class="input" id="quote-quantity" type="number" min="1" step="1" placeholder="Usar estándar">
+            </div>
+            <div class="field">
+              <label>Quién cotiza</label>
+              <select class="input" id="quote-seller-type">
+                <option value="seller">Vendedor</option>
+                <option value="owner">Dueño</option>
+              </select>
+            </div>
+          </div>
+          <div class="quote-result" id="quote-result"></div>
+        </section>
+
         <section class="model-price-section" id="model-price-section">
           <div class="model-price-section-head">
             <div>
@@ -152,7 +185,7 @@
               <h3>Lista rápida de manillas</h3>
               <p>Consulta cada modelo por número y tamaño de balines. Compara oro 18K con todos los estilos disponibles en oro laminado.</p>
             </div>
-            <div class="model-price-actions">
+            <div class="model-price-actions admin-only">
               <button class="btn btn-soft btn-sm" id="add-price-model-btn" type="button">＋ Nueva manilla</button>
               <button class="btn btn-outline btn-sm" id="add-price-addon-btn" type="button">＋ Nuevo dije</button>
             </div>
@@ -175,7 +208,7 @@
         <div class="public-price-summary" id="public-price-summary"></div>
         <div class="public-price-grid" id="public-price-list"></div>
 
-        <div class="price-admin-bar">
+        <div class="price-admin-bar admin-only">
           <button class="btn btn-soft btn-sm" id="add-price-family-btn" type="button">＋ Nueva familia</button>
           <button class="btn btn-outline btn-sm" id="price-settings-btn" type="button">⚙ Base fija y cantidades</button>
           <button class="btn btn-outline btn-sm" id="reset-prices-btn" type="button">↺ Restaurar precios de fábrica</button>
@@ -463,6 +496,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
   <script src="js/domain.js"></script>
+  <script src="js/quote-catalog.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

@@ -12,12 +12,15 @@ const FB_CONFIG = {
 
 const DATA_PATH = 'aurea/v1/data';
 const PIN_PATH = 'aurea/v1/config/pinHash';
+const USERS_PATH = 'aurea/v1/users';
 const LOCAL_KEY = 'aurea_data_v1';
 const PIN_KEY = 'aurea_pin_hash_v1';
 const PENDING_CRITICAL_KEY = 'aurea_pending_critical_v1';
 const APP_CHECK_SITE_KEY = '6Ld8oGstAAAAALAszbzyh31d-rv9sq3jITg0sTNX';
 const SCHEMA_VERSION = 2;
 const D = window.AureaDomain;
+const OWNER_EMAIL = 'gomajupa@gmail.com';
+const QUOTE_CATALOG_SEED = 1;
 
 const AUREA_BRAND_PROMPT = `Dirección artística de catálogo premium para AUREA, una marca colombiana de manillas artesanales. Inspiración visual: fotografía vertical elegante, cálida y romántica; paleta champaña, crema, rosa empolvado, negro profundo y dorado; telas satinadas, lino fino, fibras naturales y flores secas muy sutiles; iluminación editorial suave con destellos dorados controlados; profundidad de campo delicada; producto protagonista, nítido y realista. La escena debe sentirse artesanal, femenina, amorosa, sofisticada y lista para Instagram o WhatsApp. Conservar exactamente la forma, colores, cantidades, orden y materiales de la manilla de referencia. No añadir ni quitar balines, dijes, hilos o accesorios. No generar letras, logotipos, marcas de agua, números, sellos ni iconos. Dejar espacio visual limpio en la parte superior y en la parte inferior para que Aurea coloque después su identidad, beneficios y WhatsApp sin cubrir el producto.`;
 
@@ -187,6 +190,17 @@ const DEFAULT_PRICE_FAMILIES = Object.freeze([
 const PRICE_CATALOG_SEED = 3;
 const OFFICIAL_BEAD_PRICE_FAMILIES = Object.freeze(['certificado', 'liso', 'diamantado', 'italiano', 'balin-x']);
 
+function defaultQuoteCatalog() {
+  const seed = window.AureaQuoteSeed || { seed: QUOTE_CATALOG_SEED, rules: {}, variants: [], products: [] };
+  const copy = value => JSON.parse(JSON.stringify(value));
+  return {
+    seed: seed.seed || QUOTE_CATALOG_SEED,
+    rules: copy(seed.rules || {}),
+    variants: copy(seed.variants || []),
+    products: copy(seed.products || [])
+  };
+}
+
 function seedPriceCatalog(catalog, appliedSeed) {
   const seed = number(appliedSeed);
   if (seed < 2) {
@@ -236,6 +250,7 @@ let S = {
   appliedOperations: [],
   settings: { ...DEFAULT_SETTINGS },
   priceCatalog: defaultPriceCatalog(),
+  quoteCatalog: defaultQuoteCatalog(),
   materials: DEFAULT_MATERIALS,
   designs: [],
   productions: [],
@@ -255,6 +270,9 @@ let pendingLocalChanges = false;
 let localGeneration = 0;
 let criticalInFlight = false;
 let criticalBaseState = null;
+let currentUser = null;
+let currentUserRole = 'root';
+let accessUsers = {};
 let deferredInstall = null;
 let currentComponents = [];
 let currentImageData = '';
@@ -353,6 +371,64 @@ function setSync(mode, text) {
   $('#sync-text').textContent = text;
 }
 
+const isOwnerEmail = email => String(email || '').toLowerCase() === OWNER_EMAIL;
+const canManageCatalog = () => ['root', 'admin'].includes(currentUserRole);
+
+function requireAdminAction() {
+  if (canManageCatalog()) return true;
+  toast('Tu perfil de vendedor solo puede consultar y cotizar');
+  return false;
+}
+
+async function loadCurrentUserRole(user) {
+  currentUser = user ? { uid: user.uid, email: user.email || '' } : null;
+  if (!user) {
+    currentUserRole = 'root';
+    return true;
+  }
+  if (isOwnerEmail(user.email)) {
+    currentUserRole = 'root';
+    return true;
+  }
+  try {
+    const snapshot = await db.ref(`${USERS_PATH}/${user.uid}`).once('value');
+    const profile = snapshot.val();
+    if (!profile || profile.active !== true) {
+      currentUserRole = 'blocked';
+      return false;
+    }
+    currentUserRole = ['admin', 'seller', 'viewer'].includes(profile.role) ? profile.role : 'viewer';
+    return true;
+  } catch (error) {
+    console.warn('Rol de usuario:', error);
+    currentUserRole = 'blocked';
+    return false;
+  }
+}
+
+function applyRoleUI() {
+  document.body.dataset.role = currentUserRole;
+  const admin = canManageCatalog();
+  $$('.admin-only').forEach(element => element.classList.toggle('hidden', !admin));
+  $$('.seller-hidden').forEach(element => element.classList.toggle('hidden', !admin));
+  if (!admin) {
+    $$('.nav-btn').forEach(button => {
+      const allowed = ['home', 'prices'].includes(button.dataset.view);
+      button.classList.toggle('hidden', !allowed);
+    });
+    $$('.quick').forEach(button => {
+      const allowed = button.dataset.go === 'prices';
+      button.classList.toggle('hidden', !allowed);
+    });
+  } else {
+    $$('.nav-btn, .quick').forEach(element => element.classList.remove('hidden'));
+  }
+  if ($('#connected-account')) {
+    const roleText = currentUserRole === 'root' ? 'Root / super admin' : currentUserRole;
+    $('#connected-account').textContent = currentUser?.email ? `${currentUser.email} · ${roleText}` : 'Modo local · root';
+  }
+}
+
 function normalizePriceCatalog(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const fallback = defaultPriceCatalog();
@@ -427,6 +503,74 @@ function normalizePriceCatalog(raw) {
   return { seed: PRICE_CATALOG_SEED, ...catalog };
 }
 
+function normalizeQuoteCatalog(raw) {
+  const fallback = defaultQuoteCatalog();
+  const source = raw && typeof raw === 'object' ? raw : fallback;
+  const rulesSource = source.rules && typeof source.rules === 'object' ? source.rules : fallback.rules;
+  const commissionSource = rulesSource.commission && typeof rulesSource.commission === 'object'
+    ? rulesSource.commission
+    : fallback.rules.commission;
+  const rules = {
+    labor: Math.max(0, Math.round(number(rulesSource.labor ?? fallback.rules.labor))),
+    packaging: Math.max(0, Math.round(number(rulesSource.packaging ?? fallback.rules.packaging))),
+    freeShippingFrom: Math.max(0, Math.round(number(rulesSource.freeShippingFrom ?? fallback.rules.freeShippingFrom))),
+    commission: {
+      tier1Rate: Math.max(0, number(commissionSource.tier1Rate ?? fallback.rules.commission.tier1Rate)),
+      tier2Rate: Math.max(0, number(commissionSource.tier2Rate ?? fallback.rules.commission.tier2Rate)),
+      tier3Rate: Math.max(0, number(commissionSource.tier3Rate ?? fallback.rules.commission.tier3Rate)),
+      tier1Limit: Math.max(0, Math.round(number(commissionSource.tier1Limit ?? fallback.rules.commission.tier1Limit))),
+      tier2Limit: Math.max(0, Math.round(number(commissionSource.tier2Limit ?? fallback.rules.commission.tier2Limit))),
+      minimumTarget: Math.max(0, Math.round(number(commissionSource.minimumTarget ?? fallback.rules.commission.minimumTarget))),
+      minimumCapPct: Math.max(0, number(commissionSource.minimumCapPct ?? fallback.rules.commission.minimumCapPct))
+    }
+  };
+  const variantSource = Array.isArray(source.variants) && source.variants.length ? source.variants : fallback.variants;
+  const variants = variantSource.map((variant, index) => {
+    const beadType = String(variant.beadType || 'Liso').trim().slice(0, 30) || 'Liso';
+    const size = number(variant.size);
+    const label = String(variant.label || `${beadType} | #${size || index + 1}`).trim().slice(0, 50);
+    const id = cleanCode(variant.id || label).toLowerCase() || `variante-${index + 1}`;
+    return {
+      id,
+      label,
+      beadType,
+      size,
+      laminatedPrice: Math.max(0, Math.round(number(variant.laminatedPrice))),
+      goldPrice: Math.max(0, Math.round(number(variant.goldPrice))),
+      laminatedCost: Math.max(0, Math.round(number(variant.laminatedCost))),
+      goldCost: Math.max(0, Math.round(number(variant.goldCost)))
+    };
+  }).filter(variant => variant.label && variant.size >= 0).slice(0, 80);
+  const productSource = Array.isArray(source.products) && source.products.length ? source.products : fallback.products;
+  const seenCodes = new Set();
+  const products = productSource.map((product, index) => {
+    let code = cleanCode(product.code || `AUR-${index + 1}`) || `AUR-${index + 1}`;
+    while (seenCodes.has(code.toLowerCase())) code = `${code.slice(0, 24)}-${index + 1}`;
+    seenCodes.add(code.toLowerCase());
+    return {
+      code,
+      name: String(product.name || 'Sin nombre').trim().slice(0, 90) || 'Sin nombre',
+      category: String(product.category || 'Sin categoría').trim().slice(0, 70),
+      type: ['MODELO', 'SET', 'COLECCION'].includes(product.type) ? product.type : 'MODELO',
+      status: product.status === 'INACTIVO' ? 'INACTIVO' : 'ACTIVO',
+      braceletCount: Math.max(1, Math.floor(number(product.braceletCount || 1))),
+      defaultBeads: Math.max(0, Math.floor(number(product.defaultBeads))),
+      commonAdjustment: Math.max(0, Math.round(number(product.commonAdjustment))),
+      laminatedAdjustment: Math.max(0, Math.round(number(product.laminatedAdjustment))),
+      goldAdjustment: Math.max(0, Math.round(number(product.goldAdjustment))),
+      costed: ['SI', 'NO', 'REVISAR'].includes(product.costed) ? product.costed : 'REVISAR',
+      quotable: ['SI', 'NO', 'REVISAR'].includes(product.quotable) ? product.quotable : 'REVISAR',
+      publish: ['SI', 'NO', 'REVISAR'].includes(product.publish) ? product.publish : 'REVISAR',
+      family: String(product.family || '').trim().slice(0, 70),
+      mixedComponent: String(product.mixedComponent || 'NO APLICA').trim().slice(0, 70) || 'NO APLICA',
+      mixedLaminatedPrice: Math.max(0, Math.round(number(product.mixedLaminatedPrice))),
+      mixedGoldPrice: Math.max(0, Math.round(number(product.mixedGoldPrice))),
+      note: String(product.note || '').trim().slice(0, 220)
+    };
+  }).slice(0, 200);
+  return { seed: QUOTE_CATALOG_SEED, rules, variants, products };
+}
+
 function normalizeState(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const settings = { ...DEFAULT_SETTINGS, ...(source.settings || {}) };
@@ -492,6 +636,7 @@ function normalizeState(raw) {
     appliedOperations: Array.isArray(source.appliedOperations) ? source.appliedOperations.slice(-200) : [],
     settings,
     priceCatalog: normalizePriceCatalog(source.priceCatalog),
+    quoteCatalog: normalizeQuoteCatalog(source.quoteCatalog),
     materials,
     designs,
     productions,
@@ -740,7 +885,9 @@ async function migrateRemoteState(snapshot) {
   const raw = snapshot.exists() ? snapshot.val() : null;
   // El catálogo tiene su propia versión. Si sube, persistimos sus nuevos valores oficiales
   // aunque la estructura general de inventario y ventas no haya cambiado.
-  if (raw?.schemaVersion === SCHEMA_VERSION && number(raw?.priceCatalog?.seed) >= PRICE_CATALOG_SEED) {
+  if (raw?.schemaVersion === SCHEMA_VERSION
+    && number(raw?.priceCatalog?.seed) >= PRICE_CATALOG_SEED
+    && number(raw?.quoteCatalog?.seed) >= QUOTE_CATALOG_SEED) {
     return normalizeState(raw);
   }
   const result = await db.ref(DATA_PATH).transaction(currentRaw => {
@@ -798,8 +945,16 @@ async function initFirebase() {
     }
 
     $('#auth-screen')?.classList.add('hidden');
-    if ($('#connected-account')) $('#connected-account').textContent = signedInUser.email || 'Cuenta de Google';
     db = firebase.database();
+    const authorized = await loadCurrentUserRole(signedInUser);
+    if (!authorized) {
+      $('#auth-screen')?.classList.remove('hidden');
+      $('#auth-help').innerHTML = `Esta cuenta todavía no está autorizada.<br>Envía este UID al administrador: <b>${esc(signedInUser.uid)}</b>`;
+      $('#auth-help').classList.add('error');
+      setSync('error', 'Sin permiso');
+      return false;
+    }
+    applyRoleUI();
     trackConnection();
     const snapshot = await Promise.race([
       db.ref(DATA_PATH).once('value'),
@@ -811,6 +966,7 @@ async function initFirebase() {
     pendingLocalChanges = false;
     saveLocalState();
     setSync('online', 'Sincronizado');
+    applyRoleUI();
     db.ref(DATA_PATH).on('value', snap => {
       if (saving || pendingLocalChanges || !snap.exists()) return;
       const incoming = normalizeState(snap.val());
@@ -819,6 +975,7 @@ async function initFirebase() {
       lastRemoteRevision = number(S.revision);
       saveLocalState();
       renderAll();
+      applyRoleUI();
     });
     return true;
   } catch (error) {
@@ -1003,6 +1160,7 @@ function lock() {
 }
 
 function showView(name, tab = '') {
+  if (!canManageCatalog() && !['home', 'prices'].includes(name)) name = 'prices';
   $$('.view').forEach(view => view.classList.toggle('active', view.id === `view-${name}`));
   $$('.nav-btn').forEach(button => button.classList.toggle('active', button.dataset.view === name));
   if (name === 'management' && tab) showManagementTab(tab);
@@ -1026,6 +1184,7 @@ function renderAll() {
   renderDesigner();
   renderSales();
   renderManagement();
+  applyRoleUI();
 }
 
 function activeSales() {
@@ -1240,6 +1399,210 @@ function renderInventory() {
 const priceFamilies = () => (S.priceCatalog?.families || []);
 const getPriceFamily = id => priceFamilies().find(family => family.id === id) || null;
 const priceLineLabel = value => PRICE_LINES.find(option => option.value === value)?.label || 'Otros';
+const quoteProducts = () => (S.quoteCatalog?.products || []);
+const quoteVariants = () => (S.quoteCatalog?.variants || []);
+const getQuoteProduct = code => quoteProducts().find(product => product.code === code) || null;
+const getQuoteVariant = id => quoteVariants().find(variant => variant.id === id) || null;
+
+function visibleQuoteProducts() {
+  const products = quoteProducts();
+  const filtered = canManageCatalog() ? products : products.filter(product => product.publish === 'SI');
+  return filtered.sort((a, b) => `${a.category} ${a.code}`.localeCompare(`${b.category} ${b.code}`));
+}
+
+function quoteTypeCode(beadType) {
+  if (beadType === 'Liso') return 'LIS';
+  if (beadType === 'Diamantado') return 'DIA';
+  if (beadType === 'Balín X') return 'BX';
+  if (beadType === 'Italiano') return 'ITA';
+  return cleanCode(beadType).slice(0, 3) || 'VAR';
+}
+
+function commissionAmount(utility, ownerMode = false) {
+  const value = number(utility);
+  if (ownerMode || value <= 0) return 0;
+  const config = S.quoteCatalog.rules.commission;
+  const first = Math.min(value, number(config.tier1Limit));
+  const second = Math.max(0, Math.min(value, number(config.tier2Limit)) - number(config.tier1Limit));
+  const third = Math.max(0, value - number(config.tier2Limit));
+  const tiered = first * number(config.tier1Rate) + second * number(config.tier2Rate) + third * number(config.tier3Rate);
+  const minimum = Math.min(number(config.minimumTarget), value * number(config.minimumCapPct));
+  return Math.round(Math.max(tiered, minimum));
+}
+
+function calculateCatalogQuote(product, variant, quantityOverride = 0, sellerType = 'seller') {
+  if (!product || !variant) return null;
+  const quantity = Math.max(0, Math.floor(number(quantityOverride))) || number(product.defaultBeads);
+  const baseFixed = number(product.braceletCount) * (number(S.quoteCatalog.rules.labor) + number(S.quoteCatalog.rules.packaging));
+  const common = number(product.commonAdjustment);
+  const ownerMode = sellerType === 'owner';
+  const sku = `${product.code}-${quoteTypeCode(variant.beadType)}-${String(Math.floor(number(variant.size))).padStart(2, '0')}-Q${quantity}`;
+  const notQuotable = product.quotable !== 'SI' || product.costed !== 'SI' || product.status !== 'ACTIVO';
+  const rows = [];
+  const laminatedUtility = quantity * Math.max(0, number(variant.laminatedPrice) - number(variant.laminatedCost));
+  const goldUtility = quantity * Math.max(0, number(variant.goldPrice) - number(variant.goldCost));
+
+  rows.push({
+    id: 'laminated',
+    label: 'Todo Oro Laminado 18K',
+    price: variant.laminatedPrice > 0 && !notQuotable
+      ? quantity * number(variant.laminatedPrice) + baseFixed + common + number(product.laminatedAdjustment)
+      : null,
+    message: variant.laminatedPrice > 0 ? '' : 'Falta precio laminado',
+    commission: commissionAmount(laminatedUtility, ownerMode),
+    utilityPct: laminatedUtility > 0 ? commissionAmount(laminatedUtility, ownerMode) / laminatedUtility : 0
+  });
+  rows.push({
+    id: 'mixed',
+    label: 'Oro 18K + componente laminado',
+    price: variant.goldPrice > 0 && !notQuotable
+      ? quantity * number(variant.goldPrice) + baseFixed + common + number(product.goldAdjustment) - number(product.mixedGoldPrice) + number(product.mixedLaminatedPrice)
+      : null,
+    message: variant.goldPrice > 0 ? '' : 'Sin precio oro para esta opción',
+    commission: commissionAmount(goldUtility, ownerMode),
+    utilityPct: goldUtility > 0 ? commissionAmount(goldUtility, ownerMode) / goldUtility : 0
+  });
+  rows.push({
+    id: 'gold',
+    label: 'Todo Oro 18K',
+    price: variant.goldPrice > 0 && !notQuotable
+      ? quantity * number(variant.goldPrice) + baseFixed + common + number(product.goldAdjustment)
+      : null,
+    message: variant.goldPrice > 0 ? '' : 'Sin precio oro para esta opción',
+    commission: commissionAmount(goldUtility, ownerMode),
+    utilityPct: goldUtility > 0 ? commissionAmount(goldUtility, ownerMode) / goldUtility : 0
+  });
+  return {
+    sku,
+    quantity,
+    baseFixed,
+    notQuotable,
+    warning: notQuotable ? 'NO COTIZAR ESTE MODELO. Revisa costeo, publicación o estado.' : 'LISTO: tienes las 3 opciones de precio disponibles según el material.',
+    rows
+  };
+}
+
+function renderQuoteTool() {
+  const productSelect = $('#quote-product');
+  const variantSelect = $('#quote-variant');
+  const result = $('#quote-result');
+  if (!productSelect || !variantSelect || !result) return;
+  const products = visibleQuoteProducts();
+  const variants = quoteVariants();
+  if (!products.length || !variants.length) {
+    result.innerHTML = '<div class="quote-empty">Faltan datos del cotizador. Revisa la semilla importada del Excel.</div>';
+    return;
+  }
+  const currentProduct = products.some(product => product.code === productSelect.value) ? productSelect.value : products[0].code;
+  const currentVariant = variants.some(variant => variant.id === variantSelect.value) ? variantSelect.value : variants[0].id;
+  productSelect.innerHTML = products.map(product => {
+    const status = product.quotable === 'SI' ? '' : ` · ${product.quotable}`;
+    return `<option value="${esc(product.code)}" ${product.code === currentProduct ? 'selected' : ''}>${esc(product.code)} · ${esc(product.name)}${esc(status)}</option>`;
+  }).join('');
+  variantSelect.innerHTML = variants.map(variant =>
+    `<option value="${esc(variant.id)}" ${variant.id === currentVariant ? 'selected' : ''}>${esc(variant.label)}</option>`).join('');
+  const product = getQuoteProduct(currentProduct);
+  const variant = getQuoteVariant(currentVariant);
+  const quote = calculateCatalogQuote(product, variant, $('#quote-quantity')?.value, $('#quote-seller-type')?.value);
+  if (!quote) return;
+  const adminMeta = canManageCatalog()
+    ? `<div class="quote-meta-grid">
+        <span><b>Estado</b>${esc(product.costed)} / ${esc(product.quotable)} / ${esc(product.publish)}</span>
+        <span><b>Ajuste común</b>${money(product.commonAdjustment)}</span>
+        <span><b>Ajuste Laminado</b>${money(product.laminatedAdjustment)}</span>
+        <span><b>Ajuste Oro</b>${money(product.goldAdjustment)}</span>
+      </div>`
+    : '';
+  result.innerHTML = `
+    <div class="quote-product-summary">
+      <div>
+        <span class="quote-code">${esc(product.code)}</span>
+        <h4>${esc(product.name)}</h4>
+        <p>${esc(product.category)} · ${esc(product.type)} · ${number(product.braceletCount)} manilla${number(product.braceletCount) === 1 ? '' : 's'} · ${quote.quantity} balines</p>
+      </div>
+      <span class="quote-status ${quote.notQuotable ? 'blocked' : 'ready'}">${quote.notQuotable ? 'No cotizable' : 'Cotizable'}</span>
+    </div>
+    <div class="quote-warning">${esc(quote.warning)}</div>
+    <div class="quote-prices">
+      ${quote.rows.map(row => `
+        <article class="quote-price ${row.price ? '' : 'blocked'}">
+          <span>${esc(row.label)}</span>
+          <b>${row.price ? money(row.price) : esc(row.message)}</b>
+          <small>Comisión: ${row.price ? money(row.commission) : '$0'}${row.utilityPct ? ` · ${(row.utilityPct * 100).toFixed(1)}% efectivo` : ''}</small>
+        </article>
+      `).join('')}
+    </div>
+    <div class="quote-meta">
+      <span><b>SKU interno</b>${esc(quote.sku)}</span>
+      <span><b>Base fija</b>${money(quote.baseFixed)}</span>
+      <span><b>Componente mixto</b>${esc(product.mixedComponent || 'NO APLICA')}</span>
+    </div>
+    ${adminMeta}
+    ${product.note ? `<p class="quote-note">${esc(product.note)}</p>` : ''}
+  `;
+}
+
+function openQuoteProductEditor() {
+  if (!requireAdminAction()) return;
+  const code = $('#quote-product')?.value;
+  const product = getQuoteProduct(code);
+  if (!product) { toast('Selecciona una manilla del catálogo'); return; }
+  openModal(`<div class="modal-head"><h3>Editar ${esc(product.code)}</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="form-grid two">
+      <div class="field"><label>Nombre</label><input class="input" id="qp-name" maxlength="90" value="${esc(product.name)}"></div>
+      <div class="field"><label>Categoría</label><input class="input" id="qp-category" maxlength="70" value="${esc(product.category)}"></div>
+      <div class="field"><label>Tipo</label><select class="input" id="qp-type">${['MODELO', 'SET', 'COLECCION'].map(value => `<option ${product.type === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div>
+      <div class="field"><label>Familia</label><input class="input" id="qp-family" maxlength="70" value="${esc(product.family || '')}"></div>
+      <div class="field"><label>Cant. manillas</label><input class="input" id="qp-bracelets" type="number" min="1" step="1" value="${number(product.braceletCount)}"></div>
+      <div class="field"><label>Balines estándar total</label><input class="input" id="qp-beads" type="number" min="0" step="1" value="${number(product.defaultBeads)}"></div>
+      <div class="field"><label>Ajuste común</label><input class="input" id="qp-common" type="number" min="0" step="500" value="${number(product.commonAdjustment)}"></div>
+      <div class="field"><label>Ajuste Laminado 18K</label><input class="input" id="qp-laminated" type="number" min="0" step="500" value="${number(product.laminatedAdjustment)}"></div>
+      <div class="field"><label>Ajuste Oro 18K</label><input class="input" id="qp-gold" type="number" min="0" step="500" value="${number(product.goldAdjustment)}"></div>
+      <div class="field"><label>Componente mixto</label><input class="input" id="qp-mixed-component" maxlength="70" value="${esc(product.mixedComponent || 'NO APLICA')}"></div>
+      <div class="field"><label>Precio componente Laminado</label><input class="input" id="qp-mixed-laminated" type="number" min="0" step="500" value="${number(product.mixedLaminatedPrice)}"></div>
+      <div class="field"><label>Precio componente Oro 18K</label><input class="input" id="qp-mixed-gold" type="number" min="0" step="500" value="${number(product.mixedGoldPrice)}"></div>
+      <div class="field"><label>Costeo</label><select class="input" id="qp-costed">${['SI', 'NO', 'REVISAR'].map(value => `<option ${product.costed === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div>
+      <div class="field"><label>Cotizable hoy</label><select class="input" id="qp-quotable">${['SI', 'NO', 'REVISAR'].map(value => `<option ${product.quotable === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div>
+      <div class="field"><label>Publicar vendedor</label><select class="input" id="qp-publish">${['SI', 'NO', 'REVISAR'].map(value => `<option ${product.publish === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div>
+      <div class="field"><label>Estado</label><select class="input" id="qp-status">${['ACTIVO', 'INACTIVO'].map(value => `<option ${product.status === value ? 'selected' : ''}>${value}</option>`).join('')}</select></div>
+      <div class="field full"><label>Observaciones</label><textarea class="input" id="qp-note" maxlength="220">${esc(product.note || '')}</textarea></div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="saveQuoteProduct('${esc(product.code)}')">Guardar</button></div>`);
+}
+
+function saveQuoteProduct(code) {
+  if (!requireAdminAction()) return;
+  const products = quoteProducts().map(product => ({ ...product }));
+  const index = products.findIndex(product => product.code === code);
+  if (index < 0) { toast('No encontré el modelo'); return; }
+  const name = $('#qp-name').value.trim();
+  if (!name) { toast('Escribe el nombre'); return; }
+  products[index] = {
+    ...products[index],
+    name,
+    category: $('#qp-category').value.trim() || 'Sin categoría',
+    type: $('#qp-type').value,
+    family: $('#qp-family').value.trim(),
+    braceletCount: Math.max(1, Math.floor(number($('#qp-bracelets').value))),
+    defaultBeads: Math.max(0, Math.floor(number($('#qp-beads').value))),
+    commonAdjustment: Math.max(0, Math.round(number($('#qp-common').value))),
+    laminatedAdjustment: Math.max(0, Math.round(number($('#qp-laminated').value))),
+    goldAdjustment: Math.max(0, Math.round(number($('#qp-gold').value))),
+    mixedComponent: $('#qp-mixed-component').value.trim() || 'NO APLICA',
+    mixedLaminatedPrice: Math.max(0, Math.round(number($('#qp-mixed-laminated').value))),
+    mixedGoldPrice: Math.max(0, Math.round(number($('#qp-mixed-gold').value))),
+    costed: $('#qp-costed').value,
+    quotable: $('#qp-quotable').value,
+    publish: $('#qp-publish').value,
+    status: $('#qp-status').value,
+    note: $('#qp-note').value.trim()
+  };
+  S.quoteCatalog = normalizeQuoteCatalog({ ...S.quoteCatalog, products });
+  closeModal();
+  persist();
+  renderQuoteTool();
+  toast('Modelo del catálogo guardado');
+}
 
 function renderPublicPrices() {
   const list = $('#public-price-list');
@@ -1283,9 +1646,11 @@ function renderPublicPrices() {
       <p class="public-price-note">${esc(family.note)}</p>
     </article>
   `).join('') : '<div class="empty public-price-empty"><b>Sin resultados</b>Prueba con otro nombre o tamaño.</div>';
+  renderQuoteTool();
   renderBraceletPrices();
   renderPriceModels();
   renderPricePoster();
+  applyRoleUI();
 }
 
 function renderBraceletPrices() {
@@ -1449,6 +1814,7 @@ function renderPriceModels() {
 }
 
 function openPriceModel(id = '') {
+  if (!requireAdminAction()) return;
   const existing = id ? getPriceModel(id) : null;
   editingPriceModelId = existing ? existing.id : null;
   priceModelDraft = existing
@@ -1490,6 +1856,7 @@ function closePriceModel() {
 }
 
 function savePriceModel() {
+  if (!requireAdminAction()) return;
   const name = String($('#pm-name')?.value || '').trim();
   const note = String($('#pm-note')?.value || '').trim();
   const quantities = [...new Set((String($('#pm-quantities')?.value || '').match(/\d+/g) || [])
@@ -1519,6 +1886,7 @@ function savePriceModel() {
 }
 
 function deletePriceModel() {
+  if (!requireAdminAction()) return;
   if (!editingPriceModelId) return;
   const models = priceModels();
   if (models.length <= 1) { toast('Debe quedar al menos una manilla en la lista'); return; }
@@ -1541,6 +1909,7 @@ function defaultAddonSizes() {
 }
 
 function openPriceFamily(id = '', presetLine = '') {
+  if (!requireAdminAction()) return;
   const existing = id ? getPriceFamily(id) : null;
   editingPriceFamilyId = existing ? existing.id : null;
   if (existing) {
@@ -1627,6 +1996,7 @@ function removePriceRow(index) {
 }
 
 function savePriceFamily() {
+  if (!requireAdminAction()) return;
   readPriceFamilyDraft();
   const draft = priceFamilyDraft;
   if (!draft) return;
@@ -1660,6 +2030,7 @@ function savePriceFamily() {
 }
 
 function deletePriceFamily() {
+  if (!requireAdminAction()) return;
   if (!editingPriceFamilyId) return;
   const families = priceFamilies().filter(family => family.id !== editingPriceFamilyId);
   if (!families.length) { toast('Debe quedar al menos una familia de precios'); return; }
@@ -1672,6 +2043,7 @@ function deletePriceFamily() {
 }
 
 function openPriceSettings() {
+  if (!requireAdminAction()) return;
   const catalog = S.priceCatalog;
   openModal(`<div class="modal-head"><h3>Base fija y cantidades</h3><button class="modal-close" onclick="closeModal()">×</button></div>
     <div class="form-grid">
@@ -1693,6 +2065,7 @@ function openPriceSettings() {
 }
 
 function savePriceSettings() {
+  if (!requireAdminAction()) return;
   const labor = number($('#pc-labor').value);
   const quantities = String($('#pc-quantities').value || '')
     .split(/[^\d]+/)
@@ -1708,6 +2081,7 @@ function savePriceSettings() {
 }
 
 function resetPriceCatalog() {
+  if (!requireAdminAction()) return;
   if (!confirm('¿Restaurar precios y modelos a los valores de fábrica? Se perderán los cambios que hayas escrito en esta sección.')) return;
   S.priceCatalog = defaultPriceCatalog();
   persist();
@@ -4050,6 +4424,11 @@ function bindEvents() {
   $('#material-status').onchange = renderInventory;
   $('#public-price-search').oninput = renderPublicPrices;
   $('#public-price-line').onchange = renderPublicPrices;
+  $('#quote-product').onchange = renderQuoteTool;
+  $('#quote-variant').onchange = renderQuoteTool;
+  $('#quote-quantity').oninput = renderQuoteTool;
+  $('#quote-seller-type').onchange = renderQuoteTool;
+  $('#edit-quote-product-btn').onclick = openQuoteProductEditor;
   $('#bracelet-price-family').onchange = renderBraceletPrices;
   $('#add-price-family-btn').onclick = () => openPriceFamily();
   $('#add-price-model-btn').onclick = () => openPriceModel();
@@ -4126,6 +4505,7 @@ Object.assign(window, {
   AureaDiagnostics: Object.freeze({ schemaVersion: SCHEMA_VERSION, normalizeState: value => normalizeState(clone(value)) }),
   openUserGuide, guideGo, runSetupAction,
   closeModal, openMaterial, saveMaterial, toggleMaterial, deleteMaterial,
+  openQuoteProductEditor, saveQuoteProduct,
   openPriceFamily, closePriceFamily, savePriceFamily, deletePriceFamily,
   openPriceModel, closePriceModel, savePriceModel, deletePriceModel,
   addPriceRow, removePriceRow, openPriceSettings, savePriceSettings, resetPriceCatalog,
